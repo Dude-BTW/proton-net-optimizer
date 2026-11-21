@@ -105,6 +105,9 @@ it must never switch servers on its own.
 - The connected server's live load and the best alternatives must stay
   visible in the TUI status area, derived from the current server snapshot
   (`current_server_info`), so the user can judge whether switching is useful.
+- Status colours use the Catppuccin Mocha palette in `pno/tui/theme.py`;
+  load thresholds are 40/70. Keep the Current band's background and its equal
+  top/bottom spacing intact when changing the layout.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.

@@ -110,6 +110,11 @@ the best alternative in the same pool (regular servers or Secure Core). Loads
 update with the daemon's server refresh, so the decision to switch is based on
 current measurements rather than the moment of connecting.
 
+The status area uses the Catppuccin Mocha palette: muted labels, a blue exit
+country, and a traffic-light load (green below 40%, yellow 40–69%, red 70% and
+above). The Current line is a full-width dark band with equal one-line gaps
+above and below; its colours live in `pno/tui/theme.py`.
+
 The TUI is single-instance. Opening it again from the tray, the KDE menu or
 `pno launch` focuses the existing terminal window (via kitty's control socket,
 then `kdotool`, `wmctrl` or `xdotool`). It never opens a second window; if the

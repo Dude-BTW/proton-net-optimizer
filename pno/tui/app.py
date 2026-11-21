@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -49,6 +50,7 @@ from pno.proton.selection import (
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import read_vpn_status
 from pno.state import StateStore
+from pno.tui import theme
 from pno.tui.filtering import filter_countries, filter_routes
 from pno.tui.flags import country_label, server_label
 from pno.tui.i18n import get_language, set_language, tr
@@ -518,6 +520,9 @@ class PnoApp(App[None]):
         connected = bool(vpn.get("connected"))
         previous_server = self.current_server
         self.current_server = vpn.get("server_name") if connected else None
+        paused = bool((self.remote_status or state).get("paused"))
+
+        line = Text()
         if connected:
             load_value = None
             if self.snapshot and self.current_server:
@@ -526,40 +531,61 @@ class PnoApp(App[None]):
             if load_value is None:
                 load_value = vpn.get("load")
             load_text = f"{load_value}%" if isinstance(load_value, int) else "?"
-            vpn_text = tr(
-                "status.connected",
-                server=vpn.get("server_name") or "?",
-                exit=vpn.get("exit_country") or "?",
-                load=load_text,
+            line.append(tr("status.vpn_label"), style=theme.LABEL)
+            line.append(str(vpn.get("server_name") or "?"), style=theme.server_style())
+            line.append(tr("status.arrow"), style=theme.LABEL)
+            line.append(tr("status.exit_label"), style=theme.LABEL)
+            line.append(str(vpn.get("exit_country") or "?"), style=theme.BLUE)
+            line.append(tr("status.load_open"), style=theme.LABEL)
+            line.append(
+                load_text,
+                style=theme.load_style(
+                    load_value if isinstance(load_value, int) else None
+                ),
             )
+            line.append(tr("status.close"), style=theme.LABEL)
         else:
-            vpn_text = tr("status.disconnected", home=self.config.home_country)
-        paused = bool((self.remote_status or state).get("paused"))
-        automation = tr("status.paused") if paused else tr("status.running")
-        if online:
-            daemon_text = tr("status.daemon")
-        else:
-            daemon_text = tr("status.daemon_offline")
+            line.append(tr("status.vpn_label"), style=theme.LABEL)
+            line.append(
+                tr("status.disconnected_value", home=self.config.home_country),
+                style=theme.RED,
+            )
+
+        line.append("  │  ", style=theme.SEPARATOR)
+        line.append(
+            tr("status.paused") if paused else tr("status.running"),
+            style=theme.YELLOW if paused else theme.GREEN,
+        )
+        line.append("  │  ", style=theme.SEPARATOR)
+        line.append(
+            tr("status.daemon") if online else tr("status.daemon_offline"),
+            style=theme.TEAL if online else theme.RED,
+        )
+
         mirror_when = state.get("last_mirror_refresh")
         when = (
             time.strftime("%H:%M", time.localtime(mirror_when))
             if isinstance(mirror_when, (int, float))
             else tr("status.never")
         )
-        mirror_text = tr(
-            "status.mirror",
-            country=state.get("last_mirror_country") or "-",
-            when=when,
-        )
-        parts = [vpn_text, automation, daemon_text, mirror_text]
+        line.append("  │  ", style=theme.SEPARATOR)
+        line.append(tr("status.mirrors_label"), style=theme.LABEL)
+        line.append(str(state.get("last_mirror_country") or "-"), style=theme.MAUVE)
+        line.append(tr("status.mirror_time", when=when), style=theme.LABEL)
+
         if self.snapshot is not None:
             age = int(self.snapshot.age())
-            parts.append(
-                tr("status.data_stale")
-                if self.snapshot.stale
-                else tr("status.data_age", age=age)
+            line.append("  │  ", style=theme.SEPARATOR)
+            line.append(
+                (
+                    tr("status.data_stale")
+                    if self.snapshot.stale
+                    else tr("status.data_age", age=age)
+                ),
+                style=theme.RED if self.snapshot.stale else theme.LABEL,
             )
-        self.query_one("#status-text", Static).update("  |  ".join(parts))
+
+        self.query_one("#status-text", Static).update(line)
         self.query_one("#pause-btn", Button).label = (
             tr("button.resume") if paused else tr("button.pause")
         )
@@ -572,53 +598,69 @@ class PnoApp(App[None]):
     def _render_current_info(self) -> None:
         widget = self.query_one("#current-info", Static)
         if not self.current_server:
-            widget.update(tr("current.none"))
+            widget.update(Text(tr("current.none"), style=theme.LABEL))
             return
-        if self.snapshot is None:
-            widget.update(tr("current.unknown", server=self.current_server))
-            return
-        info = current_server_info(
-            self.snapshot,
-            self.current_server,
-            max_tier=self.snapshot.max_tier or None,
-            include_tor=self.config.include_tor,
-        )
-        if info is None:
-            widget.update(tr("current.unknown", server=self.current_server))
-            return
-        server_text = server_label(info.server.name, info.server.exit_code)
-        load_text = f"{info.server.load}%"
-        if info.country_best is not None:
-            country_best_text = server_label(
-                info.country_best.name, info.country_best.exit_code
+
+        line = Text()
+        line.append(tr("current.label"), style=f"bold {theme.MAUVE}")
+        info = None
+        if self.snapshot is not None:
+            info = current_server_info(
+                self.snapshot,
+                self.current_server,
+                max_tier=self.snapshot.max_tier or None,
+                include_tor=self.config.include_tor,
             )
-            country_best_text += f" {info.country_best.load}%"
+        if info is None:
+            line.append(self.current_server, style=theme.server_style())
+            line.append(tr("current.unknown_suffix"), style=theme.LABEL)
+            widget.update(line)
+            return
+
+        line.append(
+            server_label(info.server.name, info.server.exit_code),
+            style=theme.server_style(),
+        )
+        line.append(" · ", style=theme.SEPARATOR)
+        line.append(f"{info.server.load}%", style=theme.load_style(info.server.load))
+        line.append(" · ", style=theme.SEPARATOR)
+        line.append(tr("current.best_in_prefix"), style=theme.LABEL)
+        line.append(info.server.exit_code, style=theme.BLUE)
+        line.append(" ", style=theme.LABEL)
+        if info.country_best is not None:
             delta = info.delta_country or 0
             delta_text = (
                 tr("current.best")
                 if delta <= 0
                 else tr("current.delta", delta=f"+{delta}%")
             )
+            line.append("(", style=theme.LABEL)
+            line.append(delta_text, style=theme.GREEN if delta <= 0 else theme.RED)
+            line.append("): ", style=theme.LABEL)
+            line.append(
+                server_label(info.country_best.name, info.country_best.exit_code),
+                style=theme.GREEN,
+            )
+            line.append(
+                f" {info.country_best.load}%",
+                style=theme.load_style(info.country_best.load),
+            )
         else:
-            country_best_text = tr("common.unknown")
-            delta_text = ""
-        pool_best_text = server_label(info.pool_best.name, info.pool_best.exit_code)
-        pool_best_text += f" {info.pool_best.load}%"
+            line.append(tr("common.unknown"), style=theme.LABEL)
+        line.append(" · ", style=theme.SEPARATOR)
         pool_label = tr(
             "current.pool.secure" if info.secure_core else "current.pool.regular"
         )
-        widget.update(
-            tr(
-                "current.info",
-                server=server_text,
-                load=load_text,
-                country=info.server.exit_code,
-                country_best=country_best_text,
-                delta=delta_text,
-                pool=pool_label,
-                pool_best=pool_best_text,
-            )
+        line.append(tr("current.best_pool", pool=pool_label), style=theme.TEAL)
+        line.append(
+            server_label(info.pool_best.name, info.pool_best.exit_code),
+            style=theme.GREEN,
         )
+        line.append(
+            f" {info.pool_best.load}%",
+            style=theme.load_style(info.pool_best.load),
+        )
+        widget.update(line)
 
     def _refresh_logs(self) -> None:
         view = self.query_one("#log-view", RichLog)

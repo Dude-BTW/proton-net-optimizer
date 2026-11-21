@@ -214,6 +214,17 @@ def test_current_server_load_and_comparison_are_visible(monkeypatch):
             assert "UA#2" in banner
             assert "best regular" in banner
             assert "5%" in banner
+            content = app.query_one("#current-info", Static).content
+            from pno.tui import theme
+
+            styles = {str(span.style) for span in content.spans}
+            assert any(theme.GREEN in style for style in styles)
+            assert any(theme.RED in style for style in styles)
+            assert any(theme.MAUVE in style for style in styles)
+            status_content = app.query_one("#status-text", Static).content
+            status_styles = {str(span.style) for span in status_content.spans}
+            assert any(theme.GREEN in style for style in status_styles)
+            assert any(theme.LABEL in style for style in status_styles)
         set_language("en")
 
     asyncio.run(scenario())

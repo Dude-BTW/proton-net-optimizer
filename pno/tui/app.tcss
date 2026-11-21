@@ -27,11 +27,14 @@ Screen {
     min-width: 14;
 }
 
+/* Catppuccin Mocha: keep in sync with pno/tui/theme.py. */
 #current-info {
+    width: 1fr;
     height: auto;
     min-height: 1;
     padding: 0 1;
-    color: $text-muted;
+    margin-bottom: 1;
+    background: #1e1e2e;
 }
 
 #tabs {
