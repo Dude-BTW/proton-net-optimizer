@@ -24,6 +24,7 @@ from pno import events, paths
 from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
+from pno.proton.connection import GuiActiveError, disconnect_server
 from pno.state import StateStore
 from pno.tui.i18n import set_language, tr
 
@@ -79,6 +80,11 @@ class Tray(QSystemTrayIcon):
         self.refresh_mirrors_action = QAction(tr("mirrors.refresh"), self.menu)
         self.refresh_mirrors_action.triggered.connect(self._refresh_mirrors)
         self.menu.addAction(self.refresh_mirrors_action)
+
+        self.disconnect_action = QAction(tr("button.disconnect"), self.menu)
+        self.disconnect_action.triggered.connect(self._disconnect)
+        self.disconnect_action.setEnabled(False)
+        self.menu.addAction(self.disconnect_action)
 
         self.pause_action = QAction(tr("button.pause"), self.menu)
         self.pause_action.setCheckable(True)
@@ -150,6 +156,7 @@ class Tray(QSystemTrayIcon):
         self.setIcon(_icon(visual))
         self.pause_action.setChecked(paused)
         self.pause_action.setText(tr("button.resume") if paused else tr("button.pause"))
+        self.disconnect_action.setEnabled(bool(vpn.get("connected")))
 
     # --------------------------------------------------------------- commands
     def _notify(self, message: str, *, error: bool = False) -> None:
@@ -194,6 +201,35 @@ class Tray(QSystemTrayIcon):
     def _toggle_pause(self, checked: bool) -> None:
         label = tr("button.pause") if checked else tr("button.resume")
         self._run(label, "pause" if checked else "resume")
+
+    def _disconnect(self) -> None:
+        def worker() -> None:
+            try:
+                disconnect_server()
+            except GuiActiveError:
+                self.showMessage(
+                    tr("app.title"),
+                    tr("tray.gui_active"),
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    6000,
+                )
+            except PnoError as exc:
+                self.showMessage(
+                    tr("app.title"),
+                    tr("notify.disconnect_failed", error=exc.message),
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    6000,
+                )
+            else:
+                self.showMessage(
+                    tr("app.title"),
+                    tr("notify.disconnected"),
+                    QSystemTrayIcon.MessageIcon.Information,
+                    4000,
+                )
+            self._probe()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _open_tui(self) -> None:
         from pno.launcher import open_tui

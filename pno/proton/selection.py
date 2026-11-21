@@ -51,6 +51,33 @@ def regular_countries(
     return result
 
 
+def secure_core_routes(
+    snapshot: ServerSnapshot,
+    *,
+    max_tier: int | None = None,
+    include_tor: bool = False,
+    inventory: Inventory | None = None,
+    inventory_only: bool = False,
+) -> list[Server]:
+    """Return Secure Core logical servers, least loaded first.
+
+    When ``inventory_only`` is set, only the exact routes listed in the
+    inventory are returned.
+    """
+    routes = eligible_servers(
+        snapshot.servers,
+        max_tier=max_tier,
+        include_tor=include_tor,
+        secure_core=True,
+    )
+    if inventory_only and inventory is not None:
+        allowed = {name.upper() for name in inventory.secure_core_servers}
+        routes = [server for server in routes if server.name.upper() in allowed]
+    return sorted(
+        routes, key=lambda server: (server.load, server.exit_code, server.name)
+    )
+
+
 def secure_core_countries(
     snapshot: ServerSnapshot,
     inventory: Inventory,

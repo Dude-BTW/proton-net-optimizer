@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pno.inventory import Inventory, load, parse_secure_core_name
 from pno.proton.models import FEATURE_SECURE_CORE, FEATURE_TOR
-from pno.proton.selection import regular_countries, secure_core_countries
+from pno.proton.selection import (
+    regular_countries,
+    secure_core_countries,
+    secure_core_routes,
+)
 from pno.proton.serverlist import snapshot_from_payload
 from tests.fixtures import helper_payload, server
 
@@ -15,6 +19,10 @@ def test_parse_secure_core_name():
     assert parse_secure_core_name("CH-US#3") == ("CH", "US")
     assert parse_secure_core_name("IS") is None
     assert parse_secure_core_name("bad") is None
+
+
+def test_inventory_country_codes_include_entries_and_exits():
+    assert load().country_codes() == ("CH", "DE", "IS", "JP", "PL", "SE", "UA", "US")
 
 
 def test_inventory_defaults_contain_the_documented_entries():
@@ -69,6 +77,21 @@ def test_secure_core_aggregates_by_exit_country():
     assert aggregates[0].best.name == "IS-US#1"
     assert aggregates[0].entry_codes == ("IS", "CH")
     assert len(aggregates[0].routes) == 2
+
+
+def test_secure_core_routes_lists_all_routes_sorted_by_load():
+    data = snapshot(
+        [
+            server("CH-US#3", "CH", "US", 40, features=FEATURE_SECURE_CORE),
+            server("FR-US#9", "FR", "US", 10, features=FEATURE_SECURE_CORE),
+            server("US#1", "US", "US", 1),
+        ]
+    )
+    routes = secure_core_routes(data)
+    assert [route.name for route in routes] == ["FR-US#9", "CH-US#3"]
+    inventory = Inventory(secure_core_servers=("CH-US#3",))
+    filtered = secure_core_routes(data, inventory=inventory, inventory_only=True)
+    assert [route.name for route in filtered] == ["CH-US#3"]
 
 
 def test_secure_core_ignores_servers_outside_inventory():

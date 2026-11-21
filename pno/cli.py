@@ -18,7 +18,11 @@ from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
 from pno.mirrors.service import mirrors_overview, refresh_mirrors
-from pno.proton.selection import regular_countries, secure_core_countries
+from pno.proton.selection import (
+    regular_countries,
+    secure_core_countries,
+    secure_core_routes,
+)
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import read_vpn_status
 from pno.state import StateStore
@@ -59,7 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="limit to a country code (repeatable or comma-separated)",
     )
     servers.add_argument(
-        "--secure-core", action="store_true", help="show Secure Core aggregates"
+        "--secure-core", action="store_true", help="show Secure Core servers"
+    )
+    servers.add_argument(
+        "--routes",
+        action="store_true",
+        help="with --secure-core: list every route instead of country aggregates",
+    )
+    servers.add_argument(
+        "--inventory",
+        action="store_true",
+        help="limit to countries/routes listed in the inventory",
     )
     servers.add_argument(
         "--refresh", action="store_true", help="force a fresh Proton fetch"
@@ -69,6 +83,19 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_flag(connect)
     connect.add_argument("server", help="logical server name, e.g. CH-US#3")
     connect.add_argument("--force", action="store_true", help="skip name validation")
+    connect.add_argument(
+        "--close-gui",
+        action="store_true",
+        help="close a running Proton VPN GUI and disconnect before connecting",
+    )
+
+    disconnect = sub.add_parser("disconnect", help="disconnect from Proton VPN")
+    _add_json_flag(disconnect)
+    disconnect.add_argument(
+        "--close-gui",
+        action="store_true",
+        help="close a running Proton VPN GUI if it holds the connection",
+    )
 
     mirrors = sub.add_parser("mirrors", help="inspect or refresh Arch mirrors")
     _add_json_flag(mirrors)
@@ -253,6 +280,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_servers(args, config)
     if command == "connect":
         return _cmd_connect(args, config)
+    if command == "disconnect":
+        return _cmd_disconnect(args, config)
     if command == "mirrors":
         return _cmd_mirrors(args, config)
     if command == "daemon":
@@ -339,6 +368,50 @@ def _cmd_servers(args: argparse.Namespace, config: Config) -> int:
     top_n = args.top if args.top is not None else config.top_n
     if not 1 <= top_n <= 100:
         raise PnoError("--top must be between 1 and 100", detail=str(top_n))
+    if args.routes and not args.secure_core:
+        raise PnoError("--routes requires --secure-core")
+
+    if args.secure_core and args.routes:
+        inventory_names = {name.upper() for name in inventory.secure_core_servers}
+        routes = secure_core_routes(
+            snapshot,
+            max_tier=max_tier,
+            include_tor=config.include_tor,
+            inventory=inventory,
+            inventory_only=args.inventory,
+        )
+        if filters:
+            routes = [
+                route
+                for route in routes
+                if route.exit_code in filters or route.entry_code in filters
+            ]
+        payload = {
+            "kind": "secure-core-routes",
+            "generated_at": snapshot.fetched_at,
+            "source": snapshot.source,
+            "stale": snapshot.stale,
+            "max_tier": snapshot.max_tier,
+            "routes": [
+                {
+                    **_server_payload(route),
+                    "inventory": route.name.upper() in inventory_names,
+                }
+                for route in routes
+            ],
+        }
+        if args.json:
+            _print(payload, True)
+            return 0
+        if snapshot.stale:
+            print("# warning: server data is stale; run with --refresh")
+        for route in routes:
+            marker = " [inv]" if route.name.upper() in inventory_names else ""
+            print(
+                f"{route.entry_code:2} -> {route.exit_code:2}  {route.name:<12} "
+                f"{route.load:3}%  score {route.score:5.2f}  {route.city or '-'}{marker}"
+            )
+        return 0
 
     if args.secure_core:
         aggregates = secure_core_countries(
@@ -393,6 +466,9 @@ def _cmd_servers(args: argparse.Namespace, config: Config) -> int:
         known_countries=inventory.known_countries,
         include_all=inventory.include_all_countries,
     )
+    if args.inventory:
+        allowed = set(inventory.country_codes())
+        countries = [item for item in countries if item.code in allowed]
     if filters:
         countries = [item for item in countries if item.code in filters]
     payload = {
@@ -432,6 +508,8 @@ def _cmd_servers(args: argparse.Namespace, config: Config) -> int:
 
 # -------------------------------------------------------------------- connect
 def _cmd_connect(args: argparse.Namespace, config: Config) -> int:
+    from pno.proton.connection import connect_server
+
     name = args.server.strip().upper()
     if not args.force:
         snapshot = ServerCache(helper_timeout=config.proton_helper_timeout).get(
@@ -443,26 +521,22 @@ def _cmd_connect(args: argparse.Namespace, config: Config) -> int:
                 detail=name,
                 hint="Run 'pno servers' or 'pno servers --secure-core' first.",
             )
-    events.emit("info", "vpn", "vpn.connect.requested", {"server": name})
-    from pno.errors import VpnError
-    from pno.proc import run
-
-    result = run(
-        ["protonvpn", "connect", name],
-        timeout=240,
-        error_factory=VpnError,
-        error_detail="protonvpn connect",
-    )
-    if result.returncode != 0:
-        raise PnoError(
-            "protonvpn connect failed",
-            detail=(result.stderr or result.stdout).strip()[-500:],
-        )
-    events.emit("info", "vpn", "vpn.connect.done", {"server": name})
+    outcome = connect_server(name, close_gui=args.close_gui)
     if args.json:
-        _print({"ok": True, "server": name}, True)
+        _print(outcome.to_dict(), True)
     else:
-        print(result.stdout.strip() or f"connected to {name}")
+        print(outcome.output or f"connected to {name}")
+    return 0
+
+
+def _cmd_disconnect(args: argparse.Namespace, config: Config) -> int:
+    from pno.proton.connection import disconnect_server
+
+    outcome = disconnect_server(close_gui=args.close_gui)
+    if args.json:
+        _print(outcome.to_dict(), True)
+    else:
+        print(outcome.output or "disconnected")
     return 0
 
 

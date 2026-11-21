@@ -7,7 +7,10 @@ The tool **never switches the VPN by itself**. It measures, ranks and shows;
 you press Connect.
 
 - CLI and Textual TUI
-- Secure Core shown as one aggregate row per exit country
+- Country flags, search and an "inventory only" filter in both server views
+- Secure Core: every route in the TUI, aggregates per exit country in the CLI
+- Explicit Disconnect button and CLI command
+- Detects a running Proton VPN GUI and offers to close it before connecting
 - Mirror refresh on VPN exit change, on a schedule, and on demand
 - Background daemon with pause/resume, persisted across reboots
 - Tray icon and a KDE application-menu entry on Wayland
@@ -68,7 +71,11 @@ pno doctor                       # environment diagnostics
 pno servers --top 10             # all countries, least-loaded servers first
 pno servers --country UA,DE      # narrow the view
 pno servers --secure-core        # aggregate Secure Core view
+pno servers --secure-core --routes  # every Secure Core route
+pno servers --inventory          # only countries/routes from the inventory
 pno connect CH-US#3              # explicitly connect (you decide)
+pno connect CH-US#3 --close-gui  # close a running Proton GUI, then connect
+pno disconnect                   # disconnect now
 pno mirrors status               # current target country and mirrorlist
 pno mirrors preview              # measure, show diff, write nothing
 pno mirrors refresh              # measure and apply
@@ -85,14 +92,25 @@ Every command that returns structured data also accepts `--json`.
 
 | Tab | Contents |
 | --- | --- |
-| Servers | All countries (best load first) and the top-N least-loaded servers in each |
-| Secure Core | Exit countries from the inventory, best load %, entry countries, route count |
+| Servers | All countries (best load first) and the top-N least-loaded servers in each, with flags, search and an inventory filter |
+| Secure Core | All Secure Core routes with entry/exit flags, load, score, city and an inventory marker; search and inventory filter |
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
 | Logs | Tail of the JSONL event stream |
 | Settings | Top-N, home country, terminal, language (EN/UK) |
 
-Keys: `F5` refresh, `c` connect to the selected row, `p` pause/resume, `Ctrl+Q`
-quit. The current selection is never applied automatically.
+Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
+`p` pause/resume, `Ctrl+Q` quit. The current selection is never applied
+automatically.
+
+Search is case-insensitive; several words are combined with AND. It matches
+country codes and names (EN/UK), load values, server counts, server names and
+cities. The “Inventory only” checkbox uses `pno/data/inventory.toml`:
+`CH, DE, IS, JP, PL, SE, UA, US` for regular countries and the exact Secure
+Core routes for the Secure Core tab.
+
+If the Proton VPN GUI is running while a VPN connection is active, connecting
+from the TUI opens a dialog. **Yes** closes the GUI, disconnects, and connects
+through pno; **No** leaves everything untouched.
 
 ## How it works
 
@@ -118,9 +136,9 @@ hard-coded.
 
 The inventory (`pno/data/inventory.toml`) lists the Secure Core logical servers
 the setup knows about, e.g. `CH-US#3` = entry Switzerland, exit United States.
-The view aggregates by **exit country**: the percentage is the lowest load
-among the eligible routes for that country, and the entry countries and route
-count are shown as details.
+The TUI lists all available routes (entry → exit, load, score, city) and marks
+the inventory ones. The CLI keeps the aggregate per exit country: the
+percentage is the lowest load among eligible routes for that country.
 
 ### Mirrors
 
@@ -254,6 +272,15 @@ Alacritty, Foot, WezTerm and XTerm are recognised).
 ```
 
 Tests are fully offline: no network, no Proton, no pacman, no sudo.
+
+## Proton VPN GUI
+
+NetworkManager does not record which frontend created a connection. pno
+therefore treats “GUI process running **and** VPN connected” as GUI ownership.
+Before connecting from the TUI it offers to close the GUI (SIGTERM, SIGKILL
+only as a fallback after 10 s), disconnect the old session, wait for
+NetworkManager, and connect to the chosen server. Nothing happens unless you
+press **Yes**.
 
 ## Known limitations
 

@@ -16,6 +16,7 @@ def test_parser_has_the_documented_commands():
         "doctor",
         "servers",
         "connect",
+        "disconnect",
         "mirrors",
         "daemon",
         "tui",
@@ -32,6 +33,23 @@ def test_servers_flags():
     assert args.top == 3
     assert args.country == ["UA,DE"]
     assert args.json is True
+
+
+def test_servers_inventory_and_route_flags():
+    parser = build_parser()
+    args = parser.parse_args(["servers", "--secure-core", "--routes", "--inventory"])
+    assert args.secure_core is True
+    assert args.routes is True
+    assert args.inventory is True
+
+
+def test_connect_and_disconnect_gui_flags():
+    parser = build_parser()
+    connect = parser.parse_args(["connect", "CH#1", "--close-gui"])
+    assert connect.close_gui is True
+    disconnect = parser.parse_args(["disconnect", "--close-gui", "--json"])
+    assert disconnect.close_gui is True
+    assert disconnect.json is True
 
 
 def test_mirrors_subcommands():

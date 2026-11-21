@@ -233,6 +233,21 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
             )
         )
 
+    from pno.proton.gui import find_gui_processes
+
+    gui_processes = find_gui_processes()
+    if gui_processes:
+        checks.append(
+            _check(
+                "proton gui",
+                LEVEL_WARN,
+                "running (pids: " + ", ".join(str(p.pid) for p in gui_processes) + ")",
+                "pno can close it with consent before connecting from the TUI.",
+            )
+        )
+    else:
+        checks.append(_check("proton gui", LEVEL_OK, "not running"))
+
     from pno.install import desktop_path, icon_path
 
     if desktop_path().is_file() and icon_path().is_file():

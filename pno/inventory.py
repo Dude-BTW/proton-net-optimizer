@@ -32,6 +32,19 @@ class Inventory:
     known_countries: tuple[str, ...] = ()
     include_all_countries: bool = True
 
+    def country_codes(self) -> tuple[str, ...]:
+        """Every country code mentioned in the inventory.
+
+        This is the set used by the "inventory only" filter: bare country
+        entries plus the entry and exit countries of Secure Core routes.
+        """
+        result: set[str] = set(self.known_countries)
+        for name in self.secure_core_servers:
+            parsed = parse_secure_core_name(name)
+            if parsed:
+                result.update(parsed)
+        return tuple(sorted(code for code in result if code))
+
     def exits(self) -> tuple[str, ...]:
         """Exit countries, explicit list first, then derived from server names."""
         result: list[str] = []

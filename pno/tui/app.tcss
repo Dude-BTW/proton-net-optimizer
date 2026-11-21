@@ -16,10 +16,15 @@ Screen {
 }
 
 #pause-btn,
-#refresh-btn {
+#refresh-btn,
+#disconnect-btn {
     width: auto;
     min-width: 12;
     margin-left: 1;
+}
+
+#disconnect-btn {
+    min-width: 14;
 }
 
 #tabs {
@@ -34,6 +39,37 @@ TabPane {
     height: 1fr;
 }
 
+#servers-filters,
+#secure-filters {
+    height: auto;
+    layout: horizontal;
+    align: left middle;
+    padding: 0 1;
+}
+
+#servers-filters Input,
+#secure-filters Input {
+    width: 1fr;
+}
+
+#servers-filters Checkbox,
+#secure-filters Checkbox {
+    width: auto;
+    margin-left: 2;
+}
+
+#servers-filters Static,
+#secure-filters Static {
+    width: auto;
+    min-width: 12;
+    margin-left: 2;
+    color: $text-muted;
+}
+
+#servers-tables {
+    height: 1fr;
+}
+
 #country-table {
     width: 2fr;
     height: 1fr;
@@ -44,6 +80,10 @@ TabPane {
     width: 3fr;
     height: 1fr;
     margin-left: 1;
+}
+
+#servers-tables #country-table {
+    width: 2fr;
 }
 
 #server-table {
@@ -75,6 +115,43 @@ TabPane {
 #secure-actions {
     height: auto;
     padding: 1 0;
+}
+
+GuiConflictScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#gui-dialog {
+    width: 72;
+    height: auto;
+    padding: 1 2;
+    border: thick $error;
+    background: $surface;
+}
+
+#gui-dialog-title {
+    text-style: bold;
+    color: $error;
+    padding-bottom: 1;
+}
+
+#gui-dialog-message {
+    padding-bottom: 1;
+}
+
+#gui-dialog-detail {
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+#gui-dialog-actions {
+    height: auto;
+    align: right middle;
+}
+
+#gui-dialog-actions Button {
+    margin-left: 2;
 }
 
 #mirror-layout {
