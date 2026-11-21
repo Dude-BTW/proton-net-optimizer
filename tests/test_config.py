@@ -57,3 +57,18 @@ def test_env_paths_are_isolated(tmp_path, monkeypatch):
     assert paths.config_file().parent == tmp_path / "cfg"
     assert paths.state_file().parent == tmp_path / "state"
     assert paths.socket_path().parent == tmp_path / "run"
+
+
+def test_default_language_is_english(tmp_path, monkeypatch):
+    monkeypatch.setenv("PNO_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert config_module.ensure().language == "en"
+
+
+def test_language_change_is_persisted(tmp_path):
+    path = tmp_path / "config.toml"
+    config = Config(language="en")
+    config_module.save(config, path)
+    assert config_module.load(path).language == "en"
+    config.language = "uk"
+    config_module.save(config, path)
+    assert config_module.load(path).language == "uk"

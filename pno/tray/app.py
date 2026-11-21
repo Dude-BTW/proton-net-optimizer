@@ -25,6 +25,7 @@ from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
 from pno.proton.connection import GuiActiveError, disconnect_server
+from pno.requirements import check_requirements
 from pno.state import StateStore
 from pno.tui.i18n import set_language, tr
 
@@ -281,6 +282,19 @@ def main() -> int:
         print("pno: system tray is not available", file=sys.stderr)
         return 1
     tray = Tray(app, config)
+    report = check_requirements(config, for_tray=True)
+    events.emit("info", "requirements", "requirements.check", report.to_dict())
+    if report.failures or report.warnings:
+        tray.showMessage(
+            tr("requirements.title"),
+            report.summary(),
+            (
+                QSystemTrayIcon.MessageIcon.Critical
+                if report.failures
+                else QSystemTrayIcon.MessageIcon.Warning
+            ),
+            10000,
+        )
     events.emit("info", "tray", "tray.start")
     code = app.exec()
     tray.hide()

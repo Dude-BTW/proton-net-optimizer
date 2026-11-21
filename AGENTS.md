@@ -105,18 +105,28 @@ it must never switch servers on its own.
 - The connected server's live load and the best alternatives must stay
   visible in the TUI status area, derived from the current server snapshot
   (`current_server_info`), so the user can judge whether switching is useful.
+- The TUI, tray and daemon must run the lightweight startup checks in
+  `pno/requirements.py`. Required failures open a dialog (TUI) or notification
+  (tray) and are logged; they must not crash the process silently.
+- English is the default UI language. The configured language changes only
+  when the user selects another one in the TUI; never auto-detect the locale.
+- Terminal selection lives in `pno/launcher.py`: use the configured value,
+  otherwise auto-detect a common emulator. Never hardcode Kitty for other
+  users.
 - Status colours use the Catppuccin Mocha palette in `pno/tui/theme.py`;
   load thresholds are 40/70. Keep the Current band's background and its equal
   top/bottom spacing intact when changing the layout.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.
+- `pno/requirements.py` — startup component checks shared by TUI/tray/daemon.
 - `pno/proton/` — helper, cache, status, selection, GUI detection, actions.
 - `pno/mirrors/` — status, probe, planner, apply, root helper.
 - `pno/tui/` — Textual UI, filters, flags, modals and i18n; `pno/tray/` — PySide6 tray.
 - `pno/install.py` — user unit, autostart, KDE menu entry, icon, sudo helper.
 - `pno/launcher.py` — opens the TUI in the configured terminal (desktop/tray).
 - `pno/data/` — inventory, country names, unit/desktop templates, app icon.
+- `.github/workflows/ci.yml` — Arch container CI (tests, lint, types).
 - `tests/` — offline suite only.
 
 ## Git workflow

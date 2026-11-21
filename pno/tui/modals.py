@@ -9,6 +9,9 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from pno.requirements import RequirementReport
+from pno.tui.i18n import tr
+
 
 class GuiConflictScreen(ModalScreen[bool]):
     """Ask whether pno may close the Proton VPN GUI and continue."""
@@ -61,3 +64,47 @@ class GuiConflictScreen(ModalScreen[bool]):
 
     def action_confirm(self) -> None:
         self.dismiss(True)
+
+
+class RequirementsScreen(ModalScreen[bool]):
+    """Show missing or degraded runtime components at startup."""
+
+    BINDINGS = [
+        Binding("escape", "continue_", "Continue"),
+        Binding("q", "quit_app", "Quit"),
+    ]
+
+    def __init__(self, report: RequirementReport) -> None:
+        super().__init__()
+        self.report = report
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="requirements-dialog"):
+            yield Static(tr("requirements.title"), id="requirements-title")
+            yield Static(self.report.summary(), id="requirements-body")
+            with Horizontal(id="requirements-actions"):
+                yield Button(
+                    tr("requirements.quit"), id="requirements-quit", variant="error"
+                )
+                yield Button(
+                    tr("requirements.continue"),
+                    id="requirements-continue",
+                    variant="primary",
+                )
+
+    def on_mount(self) -> None:
+        self.query_one("#requirements-continue", Button).focus()
+
+    @on(Button.Pressed, "#requirements-quit")
+    def _on_quit(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#requirements-continue")
+    def _on_continue(self) -> None:
+        self.dismiss(True)
+
+    def action_continue_(self) -> None:
+        self.dismiss(True)
+
+    def action_quit_app(self) -> None:
+        self.dismiss(False)

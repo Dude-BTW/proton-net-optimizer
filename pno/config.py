@@ -46,7 +46,7 @@ class Config:
 
     # Interface / integrations
     language: str = "en"
-    terminal: str = "kitty"
+    terminal: str = ""
     log_level: str = "info"
     proton_helper_timeout: float = 40.0
 

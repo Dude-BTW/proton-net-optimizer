@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm --needed --disable-download-timeout python python-pip git
+
+      - name: Create virtualenv and install project
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e ".[dev,tui]"
+
+      - name: Tests
+        run: .venv/bin/python -m pytest -q
+
+      - name: Lint
+        run: .venv/bin/ruff check .
+
+      - name: Format check
+        run: .venv/bin/black --check .
+
+      - name: Import order
+        run: .venv/bin/isort --check-only .
+
+      - name: Type check
+        run: .venv/bin/mypy pno

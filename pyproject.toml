@@ -6,8 +6,28 @@ build-backend = "setuptools.build_meta"
 name = "proton-net-optimizer"
 version = "0.1.0"
 description = "Proton VPN server suggestions and Arch Linux mirror optimization"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Dude-BTW" }]
+keywords = ["protonvpn", "archlinux", "mirrorlist", "pacman", "vpn", "textual"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: System :: Networking",
+  "Topic :: System :: Systems Administration",
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Dude-BTW/proton-net-optimizer"
+Issues = "https://github.com/Dude-BTW/proton-net-optimizer/issues"
 
 [project.optional-dependencies]
 tui = [

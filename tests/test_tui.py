@@ -23,6 +23,9 @@ class _TestApp(tui_app.PnoApp):
     def _remote_status_worker(self) -> None:  # type: ignore[override]
         return None
 
+    def _requirements_worker(self) -> None:  # type: ignore[override]
+        return None
+
 
 def seed_servers() -> None:
     snapshot = snapshot_from_payload(
@@ -225,6 +228,57 @@ def test_current_server_load_and_comparison_are_visible(monkeypatch):
             status_styles = {str(span.style) for span in status_content.spans}
             assert any(theme.GREEN in style for style in status_styles)
             assert any(theme.LABEL in style for style in status_styles)
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_requirements_modal_shows_missing_components(monkeypatch):
+    from pno.requirements import FAIL, ComponentCheck, RequirementReport
+
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            report = RequirementReport(
+                checks=(
+                    ComponentCheck(
+                        "proton-data",
+                        "Proton server data",
+                        FAIL,
+                        "no data",
+                        hint="install proton-vpn-gtk-app",
+                        required=True,
+                    ),
+                )
+            )
+            app._apply_requirements(report)
+            await pilot.pause()
+            assert app.screen.query_one("#requirements-title")
+            await pilot.click("#requirements-continue")
+            await pilot.pause()
+
+    asyncio.run(scenario())
+
+
+def test_language_change_is_remembered(monkeypatch, tmp_path):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            app._on_language(SimpleNamespace(value="uk"))
+            await pilot.pause()
+        from pno import config as config_module
+
+        assert config_module.load().language == "uk"
+        second = _TestApp()
+        assert second.config.language == "uk"
+        assert tr("servers.connect") == "Підключити"
         set_language("en")
 
     asyncio.run(scenario())

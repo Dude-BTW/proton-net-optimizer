@@ -49,12 +49,13 @@ from pno.proton.selection import (
 )
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import read_vpn_status
+from pno.requirements import RequirementReport, check_requirements
 from pno.state import StateStore
 from pno.tui import theme
 from pno.tui.filtering import filter_countries, filter_routes
 from pno.tui.flags import country_label, server_label
 from pno.tui.i18n import get_language, set_language, tr
-from pno.tui.modals import GuiConflictScreen
+from pno.tui.modals import GuiConflictScreen, RequirementsScreen
 from pno.tui.state import TAB_IDS, TuiState, TuiStateStore
 
 
@@ -219,6 +220,7 @@ class PnoApp(App[None]):
         self.set_interval(3.0, self._tick)
         self._refresh_servers_worker(force=False)
         self._remote_status_worker()
+        self._requirements_worker()
         events.emit("info", "tui", "tui.start", {"language": get_language()})
 
     def _configure_tables(self) -> None:
@@ -685,6 +687,26 @@ class PnoApp(App[None]):
         self._remote_status_worker()
 
     # --------------------------------------------------------------- workers
+    @work(thread=True, exclusive=True, group="requirements")
+    def _requirements_worker(self) -> None:
+        try:
+            report = check_requirements(self.config, for_tui=True)
+        except Exception as exc:  # noqa: BLE001 - startup must not crash the TUI
+            events.emit("error", "requirements", "requirements.crashed", {}, error=exc)
+            return
+        self.call_from_thread(self._apply_requirements, report)
+
+    def _apply_requirements(self, report: RequirementReport) -> None:
+        events.emit("info", "requirements", "requirements.check", report.to_dict())
+        if report.failures:
+            self.push_screen(RequirementsScreen(report), self._on_requirements_decision)
+        elif report.warnings:
+            self.notify(report.summary(), severity="warning", timeout=12)
+
+    def _on_requirements_decision(self, continue_startup: bool | None) -> None:
+        if not continue_startup:
+            self.exit()
+
     @work(thread=True, exclusive=True, group="remote")
     def _remote_status_worker(self) -> None:
         try:

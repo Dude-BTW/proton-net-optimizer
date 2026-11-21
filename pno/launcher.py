@@ -19,11 +19,44 @@ from pno.errors import PnoError
 
 APP_ID = "proton-net-optimizer"
 WINDOW_TITLE = "Proton Net Optimizer"
+TERMINAL_CANDIDATES = (
+    "kitty",
+    "konsole",
+    "alacritty",
+    "foot",
+    "wezterm",
+    "xterm",
+)
 
 
 def repo_root() -> Path:
     candidate = Path(__file__).resolve().parents[1]
     return candidate if (candidate / "pyproject.toml").is_file() else Path.home()
+
+
+def detect_terminal() -> str | None:
+    """Return the first installed terminal from the user's environment."""
+    env_terminal = os.environ.get("TERMINAL")
+    if env_terminal and shutil.which(env_terminal):
+        return env_terminal
+    for candidate in TERMINAL_CANDIDATES:
+        if shutil.which(candidate):
+            return candidate
+    return None
+
+
+def resolve_terminal(config: Config) -> str:
+    """Use the configured terminal, or auto-detect one."""
+    if config.terminal and shutil.which(config.terminal):
+        return config.terminal
+    detected = detect_terminal()
+    if detected:
+        return detected
+    raise PnoError(
+        "terminal emulator not found",
+        detail=config.terminal or "auto-detection",
+        hint="Set 'terminal' in config.toml to an installed terminal (kitty, konsole, ...).",
+    )
 
 
 def build_terminal_command(
@@ -35,13 +68,7 @@ def build_terminal_command(
     kitty_listen_on: Path | None = None,
 ) -> list[str]:
     """Build an argv that runs ``pno tui`` inside the configured terminal."""
-    terminal = config.terminal
-    if not shutil.which(terminal):
-        raise PnoError(
-            "terminal emulator not found",
-            detail=terminal,
-            hint="Set 'terminal' in config.toml to an installed terminal (kitty, konsole, ...).",
-        )
+    terminal = resolve_terminal(config)
     name = Path(terminal).name
     command = [terminal]
     cwd = working_directory or repo_root()

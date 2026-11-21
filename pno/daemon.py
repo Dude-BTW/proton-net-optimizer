@@ -24,6 +24,7 @@ from pno.mirrors.service import refresh_mirrors
 from pno.proton.models import ServerSnapshot
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import VpnStatus, read_vpn_status
+from pno.requirements import check_requirements
 from pno.state import StateStore
 
 MIRROR_CHECK_INTERVAL = 60.0
@@ -430,6 +431,24 @@ class Daemon:
     # ----------------------------------------------------------------- start
     async def run(self) -> None:
         self._initial_state()
+        try:
+            report = check_requirements(self.config)
+        except Exception as exc:  # noqa: BLE001 - the daemon must still run
+            events.emit("error", "requirements", "requirements.crashed", {}, error=exc)
+        else:
+            events.emit(
+                "info",
+                "requirements",
+                "requirements.check",
+                report.to_dict(),
+            )
+            for check in report.failures:
+                events.emit(
+                    "warning",
+                    "requirements",
+                    "requirements.failed",
+                    check.to_dict(),
+                )
         events.emit(
             "info",
             "daemon",

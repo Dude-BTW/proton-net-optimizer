@@ -164,6 +164,41 @@ GuiConflictScreen {
     margin-left: 2;
 }
 
+RequirementsScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#requirements-dialog {
+    width: 90;
+    height: auto;
+    max-height: 30;
+    padding: 1 2;
+    border: thick $warning;
+    background: $surface;
+}
+
+#requirements-title {
+    text-style: bold;
+    color: $warning;
+    padding-bottom: 1;
+}
+
+#requirements-body {
+    max-height: 20;
+    overflow-y: auto;
+    padding-bottom: 1;
+}
+
+#requirements-actions {
+    height: auto;
+    align: right middle;
+}
+
+#requirements-actions Button {
+    margin-left: 2;
+}
+
 #mirror-layout {
     height: 1fr;
 }

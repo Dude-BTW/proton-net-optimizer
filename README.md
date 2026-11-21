@@ -1,5 +1,7 @@
 # proton-net-optimizer (`pno`)
 
+[![CI](https://github.com/Dude-BTW/proton-net-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/Dude-BTW/proton-net-optimizer/actions/workflows/ci.yml)
+
 Suggests the least-loaded Proton VPN servers and keeps the Arch Linux
 `mirrorlist` matched to the country your traffic actually exits from.
 
@@ -18,6 +20,7 @@ you press Connect.
 - Tray icon and a KDE application-menu entry on Wayland
 - Machine-readable JSONL event log with a query command
 - Crash-safe: atomic writes, locks, timeouts, retries, no partial files
+- Startup component checks in the TUI, tray and daemon
 
 ## Requirements
 
@@ -28,6 +31,11 @@ you press Connect.
 - Python 3.11+ (the project runs in its own `.venv`)
 - `pyside6` for the tray icon (already present on most Plasma installs)
 - `sudo` for automatic mirrorlist writes
+- A terminal emulator for the tray/menu entry (Kitty, Konsole, Alacritty,
+  Foot, WezTerm and XTerm are auto-detected)
+
+`pno doctor` checks all of these explicitly; the TUI, tray and daemon also run
+a lightweight check at startup.
 
 ## Install
 
@@ -111,6 +119,11 @@ The status area uses the Catppuccin Mocha palette: muted labels, a blue exit
 country, and a traffic-light load (green below 40%, yellow 40–69%, red 70% and
 above). The Current line is a full-width dark band with equal one-line gaps
 above and below; its colours live in `pno/tui/theme.py`.
+
+On startup the TUI checks the runtime components (Arch/pacman, NetworkManager,
+the Proton CLI and data source, mirror helper, terminal). Missing required
+components open a dialog with hints; optional problems are shown as a warning.
+The same check runs in the tray and the daemon and is recorded in the event log.
 
 The TUI is single-instance. Opening it again from the tray, the KDE menu or
 `pno launch` focuses the existing terminal window (via kitty's control socket,
@@ -237,8 +250,8 @@ A systemd user service (`pno-daemon.service`):
 | `mirror_max_age_hours` | `48` | maximum age of `last_sync` |
 | `mirror_pacman_sync` | `false` | run `pacman -Sy` after applying |
 | `mirrorlist_path` | `/etc/pacman.d/mirrorlist` | target file |
-| `language` | `"en"` | `en` or `uk` |
-| `terminal` | `"kitty"` | terminal used by “Open TUI” in the tray |
+| `language` | `"en"` | `en` or `uk`; English is the default, changed only by the user |
+| `terminal` | `""` | terminal used by “Open TUI”; empty means auto-detect |
 | `log_level` | `"info"` | `debug`, `info`, `warning`, `error` |
 
 ## Logs
@@ -282,8 +295,21 @@ ignored by the reader.
 
 `pno install` registers **Proton Net Optimizer** under Network/Utilities and
 installs the vector icon. The entry runs `pno launch`, which opens the TUI in
-the terminal configured by the `terminal` key (Kitty by default; Konsole,
-Alacritty, Foot, WezTerm and XTerm are recognised).
+the terminal configured by the `terminal` key, or auto-detects Kitty, Konsole,
+Alacritty, Foot, WezTerm or XTerm when the key is empty.
+
+## Portability
+
+- Only one user per machine should own automatic mirror updates, because the
+  `mirrorlist` is system-wide. The user service, sudoers rule and backups are
+  installed per user, but they all target the same system file.
+- `home_country` defaults to `UA`; set it to your own country for the no-VPN
+  case. The server inventory is an example that can be replaced with
+  `~/.config/proton-net-optimizer/inventory.toml`.
+- The terminal is auto-detected when `terminal` is empty; set it explicitly if
+  the tray/menu should use another emulator.
+- Configuration and state stay in XDG directories; no credentials are stored
+  by this project.
 
 ## Development
 
@@ -295,7 +321,9 @@ Alacritty, Foot, WezTerm and XTerm are recognised).
 .venv/bin/mypy pno
 ```
 
-Tests are fully offline: no network, no Proton, no pacman, no sudo.
+Tests are fully offline: no network, no Proton, no pacman, no sudo. The same
+suite, lint and type checks run in GitHub Actions on every push and pull
+request (`.github/workflows/ci.yml`, Arch Linux container).
 
 ## Proton VPN GUI
 

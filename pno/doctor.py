@@ -192,17 +192,24 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 - diagnostics must not crash
         checks.append(_check("daemon", LEVEL_WARN, str(exc)))
 
-    if shutil.which(config.terminal):
-        checks.append(_check("terminal", LEVEL_OK, config.terminal))
-    else:
+    from pno.launcher import resolve_terminal
+
+    try:
+        terminal = resolve_terminal(config)
+    except PnoError as exc:
         checks.append(
             _check(
                 "terminal",
                 LEVEL_WARN,
-                f"'{config.terminal}' not found",
+                exc.message,
                 "Set 'terminal' in the configuration to your terminal emulator.",
             )
         )
+    else:
+        detail = terminal
+        if config.terminal and config.terminal != terminal:
+            detail += f" (configured '{config.terminal}' not found)"
+        checks.append(_check("terminal", LEVEL_OK, detail))
 
     from pno.proton.gui import find_gui_processes
 
@@ -261,6 +268,14 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
         )
     )
 
+    checks.append(
+        _check(
+            "config",
+            LEVEL_OK,
+            f"home_country={config.home_country}, language={config.language}",
+            "Set home_country to your own country if you are not in Ukraine.",
+        )
+    )
     checks.append(
         _check(
             "paths",

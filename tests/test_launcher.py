@@ -93,3 +93,23 @@ def test_kitty_command_can_include_a_listen_socket(tmp_path):
     )
     assert "--listen-on" in command
     assert command[command.index("--listen-on") + 1].startswith("unix:")
+
+
+def test_auto_detects_an_installed_terminal(monkeypatch):
+    monkeypatch.delenv("TERMINAL", raising=False)
+    monkeypatch.setattr(
+        launcher.shutil,
+        "which",
+        lambda name: "/usr/bin/konsole" if name == "konsole" else None,
+    )
+    assert launcher.resolve_terminal(Config(terminal="")) == "konsole"
+
+
+def test_configured_terminal_falls_back_to_detected(monkeypatch):
+    monkeypatch.delenv("TERMINAL", raising=False)
+    monkeypatch.setattr(
+        launcher.shutil,
+        "which",
+        lambda name: "/usr/bin/foot" if name == "foot" else None,
+    )
+    assert launcher.resolve_terminal(Config(terminal="missing")) == "foot"
