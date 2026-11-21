@@ -160,9 +160,6 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--yes", action="store_true", help="assume yes for prompts")
     install.add_argument("--no-sudo", action="store_true", help="skip the sudo helper")
     install.add_argument(
-        "--keep-reflector", action="store_true", help="do not disable reflector.timer"
-    )
-    install.add_argument(
         "--no-start", action="store_true", help="do not start the daemon"
     )
 
@@ -172,12 +169,6 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall.add_argument(
         "--purge", action="store_true", help="also delete config/state"
     )
-    uninstall.add_argument(
-        "--enable-reflector",
-        action="store_true",
-        help="re-enable reflector.timer after removing pno",
-    )
-
     return parser
 
 
@@ -791,7 +782,6 @@ def _cmd_install(args: argparse.Namespace) -> int:
     result = install(
         assume_yes=args.yes,
         no_sudo=args.no_sudo,
-        keep_reflector=args.keep_reflector,
         no_start=args.no_start,
     )
     if args.json:
@@ -814,7 +804,6 @@ def _cmd_install(args: argparse.Namespace) -> int:
         f"({'updated' if result.get('icon_changed') else 'unchanged'})"
     )
     print(f"Service:   {result.get('service')}")
-    print(f"Reflector: {result.get('reflector')}")
     helper = result.get("helper") or {}
     if helper.get("installed"):
         print("Sudo:      helper installed (NOPASSWD)")
@@ -828,11 +817,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 def _cmd_uninstall(args: argparse.Namespace) -> int:
     from pno.install import uninstall
 
-    result = uninstall(
-        assume_yes=args.yes,
-        purge=args.purge,
-        enable_reflector=args.enable_reflector,
-    )
+    result = uninstall(assume_yes=args.yes, purge=args.purge)
     if args.json:
         _print(result, True)
         return 0

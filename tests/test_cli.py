@@ -70,10 +70,9 @@ def test_daemon_subcommands():
 
 def test_uninstall_flags():
     parser = build_parser()
-    args = parser.parse_args(["uninstall", "--yes", "--purge", "--enable-reflector"])
+    args = parser.parse_args(["uninstall", "--yes", "--purge"])
     assert args.yes is True
     assert args.purge is True
-    assert args.enable_reflector is True
 
 
 def test_launch_command_exists():

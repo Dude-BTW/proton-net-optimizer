@@ -78,25 +78,3 @@ def test_install_desktop_files_are_idempotent(tmp_path, monkeypatch):
     assert install_module.desktop_path().is_file()
     assert install_module.icon_path().is_file()
     assert "pno launch" in install_module.desktop_path().read_text(encoding="utf-8")
-
-
-def test_reflector_detection_uses_the_system_manager(monkeypatch):
-    import pno.install as install_module
-
-    calls = []
-
-    class Result:
-        def __init__(self, stdout):
-            self.stdout = stdout
-            self.stderr = ""
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        if command[-2:] == ["is-enabled", "reflector.timer"]:
-            return Result("enabled\n")
-        return Result("active\n")
-
-    monkeypatch.setattr(install_module.subprocess, "run", fake_run)
-    assert install_module.reflector_timer_active() is True
-    assert calls[0][0] == "systemctl"
-    assert "--user" not in calls[0]

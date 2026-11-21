@@ -59,8 +59,8 @@ it must never switch servers on its own.
 - Credentials never enter the repo; read them from Proton's own storage or
   environment, never log them.
 - Do not alter VPN client or pacman configuration beyond what a task needs.
-  Taking ownership of `mirrorlist` requires disabling `reflector.timer`, with
-  the user's confirmation (`pno install` asks; `--keep-reflector` opts out).
+  `pno` is the only owner of the generated `mirrorlist`; do not add code that
+  toggles or reconfigures other mirror updaters.
 - The privileged mirror helper must stay self-contained, standard-library
   only, root-owned, and validated line by line. Never let it import
   user-writable code.

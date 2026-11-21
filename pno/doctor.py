@@ -148,35 +148,6 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
             )
         )
 
-    try:
-        enabled = subprocess.run(
-            ["systemctl", "is-enabled", "reflector.timer"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        ).stdout.strip()
-        active = subprocess.run(
-            ["systemctl", "is-active", "reflector.timer"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        ).stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        enabled, active = "", ""
-    if enabled == "enabled" or active == "active":
-        checks.append(
-            _check(
-                "reflector.timer",
-                LEVEL_WARN,
-                f"{enabled}/{active}; it may overwrite the mirrorlist",
-                "Run 'pno install' to disable it (or keep it with --keep-reflector).",
-            )
-        )
-    else:
-        checks.append(_check("reflector.timer", LEVEL_OK, "not active"))
-
     mirrorlist = Path(config.mirrorlist_path)
     if mirrorlist.is_file():
         try:

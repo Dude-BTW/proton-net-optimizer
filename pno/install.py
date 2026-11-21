@@ -86,26 +86,6 @@ def _sudo(command: list[str], *, timeout: float = 120.0) -> subprocess.Completed
     return completed
 
 
-def _systemctl_system(*args: str) -> subprocess.CompletedProcess:
-    """Query/control the *system* manager (reflector is a system timer)."""
-    try:
-        return subprocess.run(
-            ["systemctl", *args],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise PnoError("systemctl failed", detail=str(exc)) from exc
-
-
-def reflector_timer_active() -> bool:
-    enabled = _systemctl_system("is-enabled", "reflector.timer").stdout.strip()
-    active = _systemctl_system("is-active", "reflector.timer").stdout.strip()
-    return enabled == "enabled" or active == "active"
-
-
 def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     try:
         completed = subprocess.run(
@@ -256,7 +236,6 @@ def install(
     *,
     assume_yes: bool = False,
     no_sudo: bool = False,
-    keep_reflector: bool = False,
     no_start: bool = False,
 ) -> dict[str, Any]:
     config = config_module.ensure()
@@ -298,26 +277,6 @@ def install(
         result["service"] = f"error: {exc.message}"
         result.setdefault("errors", []).append(exc.message)
 
-    if not keep_reflector:
-        if reflector_timer_active():
-            if _confirm(
-                "reflector.timer is enabled and may overwrite the mirrorlist. "
-                "Disable it?",
-                assume_yes=assume_yes,
-            ):
-                try:
-                    _sudo(["systemctl", "disable", "--now", "reflector.timer"])
-                    result["reflector"] = "disabled"
-                except PnoError as exc:
-                    result["reflector"] = f"error: {exc.message}"
-                    result.setdefault("errors", []).append(exc.message)
-            else:
-                result["reflector"] = "kept"
-        else:
-            result["reflector"] = "already disabled"
-    else:
-        result["reflector"] = "kept (--keep-reflector)"
-
     try:
         result["helper"] = _install_helper(
             user=getpass.getuser(),
@@ -341,7 +300,6 @@ def uninstall(
     *,
     assume_yes: bool = False,
     purge: bool = False,
-    enable_reflector: bool = False,
 ) -> dict[str, Any]:
     config = config_module.load()
     events.configure(paths.logs_dir(), level=config.log_level)
@@ -380,15 +338,6 @@ def uninstall(
                 pass
             except OSError as exc:
                 result.setdefault("errors", []).append(f"{directory}: {exc}")
-    if enable_reflector and _confirm(
-        "Re-enable reflector.timer?", assume_yes=assume_yes
-    ):
-        try:
-            _sudo(["systemctl", "enable", "--now", "reflector.timer"])
-            result["reflector"] = "enabled"
-        except PnoError as exc:
-            result.setdefault("errors", []).append(exc.message)
-
     result["purged"] = purge
     events.emit("info", "install", "uninstall.done", {"purged": purge})
     return result

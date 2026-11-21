@@ -40,7 +40,6 @@ python3 -m venv .venv
 #   - systemd user unit for the daemon
 #   - autostart entry for the tray
 #   - root-owned helper + /etc/sudoers.d/pno-mirror
-#   - disables reflector.timer (it would overwrite the mirrorlist)
 .venv/bin/pno install
 ```
 
@@ -54,7 +53,6 @@ non-interactive run:
 ```bash
 pno install --yes                 # install everything
 pno install --no-sudo             # skip automatic mirror writes
-pno install --keep-reflector      # leave reflector.timer enabled
 pno install --no-start            # do not start the daemon now
 ```
 
@@ -62,7 +60,6 @@ Uninstall (keeps config and logs by default):
 
 ```bash
 pno uninstall          # remove unit, autostart and sudo helper
-pno uninstall --enable-reflector  # restore the weekly reflector timer
 pno uninstall --purge  # also delete config and state/logs
 ```
 
