@@ -105,6 +105,7 @@ MESSAGES = {
     "common.unknown": "невідомо",
     "common.seconds": "{value}с",
     "requirements.title": "Перевірка компонентів",
+    "requirements.all_ok": "Усі необхідні компоненти доступні",
     "requirements.continue": "Продовжити",
     "requirements.quit": "Вийти",
     "tray.open_tui": "Відкрити TUI",

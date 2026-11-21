@@ -124,6 +124,8 @@ On startup the TUI checks the runtime components (Arch/pacman, NetworkManager,
 the Proton CLI and data source, mirror helper, terminal). Missing required
 components open a dialog with hints; optional problems are shown as a warning.
 The same check runs in the tray and the daemon and is recorded in the event log.
+When everything is present, the TUI shows a short confirmation instead of a
+dialog.
 
 The TUI is single-instance. Opening it again from the tray, the KDE menu or
 `pno launch` focuses the existing terminal window (via kitty's control socket,

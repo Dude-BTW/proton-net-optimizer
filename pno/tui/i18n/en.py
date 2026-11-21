@@ -105,6 +105,7 @@ MESSAGES = {
     "common.unknown": "unknown",
     "common.seconds": "{value}s",
     "requirements.title": "Startup checks",
+    "requirements.all_ok": "All required components are available",
     "requirements.continue": "Continue",
     "requirements.quit": "Quit",
     "tray.open_tui": "Open TUI",

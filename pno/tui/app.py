@@ -702,6 +702,8 @@ class PnoApp(App[None]):
             self.push_screen(RequirementsScreen(report), self._on_requirements_decision)
         elif report.warnings:
             self.notify(report.summary(), severity="warning", timeout=12)
+        else:
+            self.notify(tr("requirements.all_ok"), severity="information", timeout=3)
 
     def _on_requirements_decision(self, continue_startup: bool | None) -> None:
         if not continue_startup:
