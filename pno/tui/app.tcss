@@ -27,6 +27,13 @@ Screen {
     min-width: 14;
 }
 
+#current-info {
+    height: auto;
+    min-height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
 #tabs {
     height: 1fr;
 }

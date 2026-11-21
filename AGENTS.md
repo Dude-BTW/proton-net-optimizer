@@ -102,6 +102,9 @@ it must never switch servers on its own.
 - TUI session state (tab, queries, filters, selected rows) is persisted in
   `tui.json` via `pno/tui/state.py`; save it atomically, debounced, and on
   unmount.
+- The connected server's live load and the best alternatives must stay
+  visible in the TUI status area, derived from the current server snapshot
+  (`current_server_info`), so the user can judge whether switching is useful.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.

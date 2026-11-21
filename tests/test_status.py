@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pno.proton.serverlist import snapshot_from_payload
-from pno.proton.status import read_vpn_status
+from pno.proton.status import VpnStatus, read_vpn_status
 from tests.fixtures import helper_payload, server
 
 
@@ -21,6 +21,7 @@ def test_nmcli_connected():
     assert status.server_name == "CH-US#3"
     assert status.exit_country == "US"
     assert status.entry_country == "CH"
+    assert status.load == 40
     assert status.source == "networkmanager"
 
 
@@ -43,6 +44,7 @@ def test_fallback_to_protonvpn_status():
     assert status.server_name == "CH-US#3"
     assert status.source == "protonvpn-cli"
     assert status.exit_country == "US"
+    assert status.load == 40
 
 
 def test_fallback_disconnected():
@@ -56,3 +58,16 @@ def test_fallback_disconnected():
     status = read_vpn_status(snap(), runner=runner)
     assert status.connected is False
     assert status.source == "protonvpn-cli"
+
+
+def test_status_load_survives_serialisation():
+    status = VpnStatus(
+        connected=True,
+        server_name="CH#1",
+        exit_country="CH",
+        load=73,
+        source="test",
+        checked_at=1.0,
+    )
+    restored = VpnStatus.from_dict(status.to_dict())
+    assert restored.load == 73

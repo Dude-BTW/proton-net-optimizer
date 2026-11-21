@@ -18,6 +18,7 @@ from pno.proton.models import ServerSnapshot
 
 _CONNECTION_RE = re.compile(r"^ProtonVPN\s+(?P<name>\S+)$", re.IGNORECASE)
 _STATUS_SERVER_RE = re.compile(r"^Server:\s*(?P<name>\S+)\s+in\s+(?P<location>.+)$")
+_STATUS_LOAD_RE = re.compile(r"^Load:\s*(?P<load>\d+)%")
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class VpnStatus:
     entry_country: str | None = None
     exit_country: str | None = None
     city: str | None = None
+    load: int | None = None
     source: str = "none"
     checked_at: float = 0.0
     error: str | None = None
@@ -40,6 +42,7 @@ class VpnStatus:
             "entry_country": self.entry_country,
             "exit_country": self.exit_country,
             "city": self.city,
+            "load": self.load,
             "source": self.source,
             "checked_at": self.checked_at,
             "error": self.error,
@@ -54,6 +57,7 @@ class VpnStatus:
             entry_country=payload.get("entry_country"),
             exit_country=payload.get("exit_country"),
             city=payload.get("city"),
+            load=payload.get("load"),
             source=str(payload.get("source") or "state"),
             checked_at=float(payload.get("checked_at") or 0.0),
             error=payload.get("error"),
@@ -75,6 +79,7 @@ def _fill_from_snapshot(
         entry_country=server.entry_code,
         exit_country=server.exit_code,
         city=server.city or status.city,
+        load=server.load,
         source=status.source,
         checked_at=status.checked_at,
         error=status.error,
@@ -116,9 +121,20 @@ def _from_protonvpn_cli(
         for raw_line in output.splitlines():
             match = _STATUS_SERVER_RE.match(raw_line.strip())
             if match:
+                load_match = _STATUS_LOAD_RE.match(
+                    next(
+                        (
+                            line.strip()
+                            for line in output.splitlines()
+                            if line.strip().startswith("Load:")
+                        ),
+                        "",
+                    )
+                )
                 status = VpnStatus(
                     connected=True,
                     server_name=match.group("name").upper(),
+                    load=int(load_match.group("load")) if load_match else None,
                     source="protonvpn-cli",
                     checked_at=time.time(),
                 )

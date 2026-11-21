@@ -142,10 +142,12 @@ class Tray(QSystemTrayIcon):
 
         vpn = self.status.get("vpn") or state.get("vpn") or {}
         if vpn.get("connected"):
+            load = vpn.get("load")
             vpn_text = tr(
                 "status.connected",
                 server=vpn.get("server_name") or "?",
                 exit=vpn.get("exit_country") or "?",
+                load=f"{load}%" if isinstance(load, int) else "?",
             )
         else:
             vpn_text = tr("status.disconnected", home=self.config.home_country)

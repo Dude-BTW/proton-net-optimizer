@@ -41,7 +41,11 @@ from pno.proton.connection import (
     wait_for_disconnected,
 )
 from pno.proton.models import CountryServers, Server, ServerSnapshot
-from pno.proton.selection import regular_countries, secure_core_routes
+from pno.proton.selection import (
+    current_server_info,
+    regular_countries,
+    secure_core_routes,
+)
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import read_vpn_status
 from pno.state import StateStore
@@ -108,6 +112,7 @@ class PnoApp(App[None]):
             yield Button(tr("button.pause"), id="pause-btn", variant="warning")
             yield Button(tr("servers.refresh"), id="refresh-btn", variant="primary")
             yield Button(tr("button.disconnect"), id="disconnect-btn", variant="error")
+        yield Static("", id="current-info")
         with TabbedContent(id="tabs"):
             with TabPane(tr("tab.servers"), id="tab-servers"):
                 with Vertical(id="servers-layout"):
@@ -514,10 +519,18 @@ class PnoApp(App[None]):
         previous_server = self.current_server
         self.current_server = vpn.get("server_name") if connected else None
         if connected:
+            load_value = None
+            if self.snapshot and self.current_server:
+                cached = self.snapshot.lookup(self.current_server)
+                load_value = cached.load if cached else None
+            if load_value is None:
+                load_value = vpn.get("load")
+            load_text = f"{load_value}%" if isinstance(load_value, int) else "?"
             vpn_text = tr(
                 "status.connected",
                 server=vpn.get("server_name") or "?",
                 exit=vpn.get("exit_country") or "?",
+                load=load_text,
             )
         else:
             vpn_text = tr("status.disconnected", home=self.config.home_country)
@@ -552,8 +565,60 @@ class PnoApp(App[None]):
         )
         self.query_one("#disconnect-btn", Button).disabled = not connected
         self.query_one("#disconnect-btn", Button).label = tr("button.disconnect")
+        self._render_current_info()
         if previous_server != self.current_server and self.selected_country_code:
             self._populate_servers(self.selected_country_code)
+
+    def _render_current_info(self) -> None:
+        widget = self.query_one("#current-info", Static)
+        if not self.current_server:
+            widget.update(tr("current.none"))
+            return
+        if self.snapshot is None:
+            widget.update(tr("current.unknown", server=self.current_server))
+            return
+        info = current_server_info(
+            self.snapshot,
+            self.current_server,
+            max_tier=self.snapshot.max_tier or None,
+            include_tor=self.config.include_tor,
+        )
+        if info is None:
+            widget.update(tr("current.unknown", server=self.current_server))
+            return
+        server_text = server_label(info.server.name, info.server.exit_code)
+        load_text = f"{info.server.load}%"
+        if info.country_best is not None:
+            country_best_text = server_label(
+                info.country_best.name, info.country_best.exit_code
+            )
+            country_best_text += f" {info.country_best.load}%"
+            delta = info.delta_country or 0
+            delta_text = (
+                tr("current.best")
+                if delta <= 0
+                else tr("current.delta", delta=f"+{delta}%")
+            )
+        else:
+            country_best_text = tr("common.unknown")
+            delta_text = ""
+        pool_best_text = server_label(info.pool_best.name, info.pool_best.exit_code)
+        pool_best_text += f" {info.pool_best.load}%"
+        pool_label = tr(
+            "current.pool.secure" if info.secure_core else "current.pool.regular"
+        )
+        widget.update(
+            tr(
+                "current.info",
+                server=server_text,
+                load=load_text,
+                country=info.server.exit_code,
+                country_best=country_best_text,
+                delta=delta_text,
+                pool=pool_label,
+                pool_best=pool_best_text,
+            )
+        )
 
     def _refresh_logs(self) -> None:
         view = self.query_one("#log-view", RichLog)
@@ -652,8 +717,12 @@ class PnoApp(App[None]):
             fresh = None
         if fresh is not None:
             self.call_from_thread(self._apply_local_vpn, fresh)
+        server = self.snapshot.lookup(name) if self.snapshot else None
+        load_text = f"{server.load}%" if server else "?"
         self.call_from_thread(
-            self.notify, tr("notify.connected", server=name), severity="information"
+            self.notify,
+            tr("notify.connected", server=name, load=load_text),
+            severity="information",
         )
         self.call_from_thread(self._remote_status_worker)
 

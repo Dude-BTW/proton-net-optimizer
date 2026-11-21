@@ -104,6 +104,12 @@ Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
 `p` pause/resume, `Ctrl+Q` quit. The current selection is never applied
 automatically.
 
+A line under the status bar always shows the connected server, its current
+load, the least-loaded server in the same country (with the difference) and
+the best alternative in the same pool (regular servers or Secure Core). Loads
+update with the daemon's server refresh, so the decision to switch is based on
+current measurements rather than the moment of connecting.
+
 The TUI is single-instance. Opening it again from the tray, the KDE menu or
 `pno launch` focuses the existing terminal window (via kitty's control socket,
 then `kdotool`, `wmctrl` or `xdotool`). It never opens a second window; if the

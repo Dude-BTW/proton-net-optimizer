@@ -4,7 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from textual.widgets import Button, Checkbox, DataTable, Input, TabbedContent
+from textual.widgets import Button, Checkbox, DataTable, Input, Static, TabbedContent
 
 from pno import paths
 from pno.proton.serverlist import snapshot_from_payload
@@ -183,6 +183,37 @@ def test_tui_session_state_is_restored(monkeypatch):
             assert second.selected_server == "DE#1"
             assert second.selected_secure_server == "CH-US#3"
             assert second.query_one("#tabs", TabbedContent).active == "tab-secure"
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_current_server_load_and_comparison_are_visible(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            app.remote_status = {
+                "vpn": {
+                    "connected": True,
+                    "server_name": "UA#1",
+                    "exit_country": "UA",
+                    "load": 10,
+                }
+            }
+            app._refresh_status()
+            await pilot.pause()
+            status = str(app.query_one("#status-text", Static).content)
+            banner = str(app.query_one("#current-info", Static).content)
+            assert "load 10%" in status
+            assert "UA#1" in banner
+            assert "10%" in banner
+            assert "UA#2" in banner
+            assert "best regular" in banner
+            assert "5%" in banner
         set_language("en")
 
     asyncio.run(scenario())

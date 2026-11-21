@@ -6,6 +6,8 @@ by Proton at fetch time, with the API score as a deterministic tie-breaker.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from pno.inventory import Inventory
 from pno.proton.models import (
     CountryServers,
@@ -118,7 +120,82 @@ def secure_core_countries(
     return result
 
 
+@dataclass(frozen=True)
+class CurrentServerInfo:
+    """Measured context for the server the user is connected to."""
+
+    server: Server
+    pool_best: Server
+    country_best: Server | None
+    pool_rank: int
+    country_rank: int | None
+
+    @property
+    def delta_pool(self) -> int:
+        return self.server.load - self.pool_best.load
+
+    @property
+    def delta_country(self) -> int | None:
+        if self.country_best is None:
+            return None
+        return self.server.load - self.country_best.load
+
+    @property
+    def secure_core(self) -> bool:
+        return self.server.secure_core
+
+
 def current_server(snapshot: ServerSnapshot, name: str | None) -> Server | None:
     if not name:
         return None
     return snapshot.lookup(name)
+
+
+def current_server_info(
+    snapshot: ServerSnapshot,
+    name: str | None,
+    *,
+    max_tier: int | None = None,
+    include_tor: bool = False,
+) -> CurrentServerInfo | None:
+    """Compare the connected server with the best alternatives.
+
+    Regular servers are compared with regular servers, Secure Core routes with
+    Secure Core routes; the country comparison always uses the same exit
+    country.
+    """
+    server = current_server(snapshot, name)
+    if server is None:
+        return None
+    pool = eligible_servers(
+        snapshot.servers,
+        max_tier=max_tier,
+        include_tor=include_tor,
+        secure_core=server.secure_core,
+    )
+    if not pool:
+        return CurrentServerInfo(
+            server=server,
+            pool_best=server,
+            country_best=None,
+            pool_rank=1,
+            country_rank=None,
+        )
+    pool_best = min(pool, key=lambda item: item.sort_key)
+    country_pool = [item for item in pool if item.exit_code == server.exit_code]
+    country_best = (
+        min(country_pool, key=lambda item: item.sort_key) if country_pool else None
+    )
+    pool_rank = 1 + sum(1 for item in pool if item.sort_key < server.sort_key)
+    country_rank = (
+        1 + sum(1 for item in country_pool if item.sort_key < server.sort_key)
+        if country_pool
+        else None
+    )
+    return CurrentServerInfo(
+        server=server,
+        pool_best=pool_best,
+        country_best=country_best,
+        pool_rank=pool_rank,
+        country_rank=country_rank,
+    )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pno.inventory import Inventory, load, parse_secure_core_name
 from pno.proton.models import FEATURE_SECURE_CORE, FEATURE_TOR
 from pno.proton.selection import (
+    current_server_info,
     regular_countries,
     secure_core_countries,
     secure_core_routes,
@@ -118,3 +119,47 @@ def test_known_countries_can_limit_the_view():
         data, top_n=5, known_countries=("UA",), include_all=False
     )
     assert [item.code for item in countries] == ["UA"]
+
+
+def test_current_server_info_compares_with_regular_servers():
+    data = snapshot(
+        [
+            server("UA#1", "UA", "UA", 10),
+            server("UA#2", "UA", "UA", 5),
+            server("DE#1", "DE", "DE", 1),
+            server("CH-US#3", "CH", "US", 2, features=FEATURE_SECURE_CORE),
+        ]
+    )
+    info = current_server_info(data, "UA#1")
+    assert info is not None
+    assert info.pool_best.name == "DE#1"
+    assert info.country_best is not None
+    assert info.country_best.name == "UA#2"
+    assert info.delta_country == 5
+    assert info.delta_pool == 9
+    assert info.pool_rank == 3
+    assert info.country_rank == 2
+    assert info.secure_core is False
+
+
+def test_current_server_info_compares_secure_core_routes_only():
+    data = snapshot(
+        [
+            server("CH-US#3", "CH", "US", 40, features=FEATURE_SECURE_CORE),
+            server("FR-US#9", "FR", "US", 10, features=FEATURE_SECURE_CORE),
+            server("US#1", "US", "US", 1),
+        ]
+    )
+    info = current_server_info(data, "CH-US#3")
+    assert info is not None
+    assert info.pool_best.name == "FR-US#9"
+    assert info.country_best is not None
+    assert info.country_best.name == "FR-US#9"
+    assert info.delta_country == 30
+    assert info.secure_core is True
+
+
+def test_current_server_info_unknown_name():
+    assert (
+        current_server_info(snapshot([server("DE#1", "DE", "DE", 1)]), "ZZ#1") is None
+    )
