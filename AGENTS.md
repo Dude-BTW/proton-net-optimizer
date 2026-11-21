@@ -133,10 +133,6 @@ it must never switch servers on its own.
 
 ## Git workflow
 - Every implementation task ends with a commit. Run the full check set first.
-- After the commit, push it to the configured GitHub `origin` (`git push`). If
-  the push fails, report the exact error; never force-push or rewrite history.
-- The repository is public: never push credentials, tokens, private keys or
-  local state.
 - Stage only the files changed by the task. Do not use `git add -A` while
   unrelated modified or untracked files exist.
 - Never commit `.venv/`, caches, `*.env`, credentials, runtime state, logs, or
