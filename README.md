@@ -1,6 +1,7 @@
 # proton-net-optimizer (`pno`)
 
 [![CI](https://github.com/Dude-BTW/proton-net-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/Dude-BTW/proton-net-optimizer/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 Suggests the least-loaded Proton VPN servers and keeps the Arch Linux
 `mirrorlist` matched to the country your traffic actually exits from.
@@ -313,6 +314,12 @@ Alacritty, Foot, WezTerm or XTerm when the key is empty.
 - Configuration and state stay in XDG directories; no credentials are stored
   by this project.
 
+## AI-assisted development
+
+This project was built with an AI coding agent (OpenCode) working together
+with the maintainer. The agent wrote code and tests, while the maintainer
+reviewed changes, ran the checks and made the product decisions.
+
 ## Development
 
 ```bash
@@ -335,6 +342,16 @@ Before connecting from the TUI it offers to close the GUI (SIGTERM, SIGKILL
 only as a fallback after 10 s), disconnect the old session, wait for
 NetworkManager, and connect to the chosen server. Nothing happens unless you
 press **Yes**.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 only**
+(GPL-3.0-only). See [LICENSE](LICENSE).
+
+Dependencies keep their own licenses: the Proton VPN Linux applications are
+GPL-3.0, PySide6 is LGPL-3.0/GPL-3.0, and Textual is MIT. The Proton fetch
+helper imports Proton's GPL-licensed libraries at runtime; GPL-3.0 keeps that
+combination unambiguous.
 
 ## Known limitations
 

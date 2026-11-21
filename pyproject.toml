@@ -9,11 +9,13 @@ description = "Proton VPN server suggestions and Arch Linux mirror optimization"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Dude-BTW" }]
+license = { text = "GPL-3.0-only" }
 keywords = ["protonvpn", "archlinux", "mirrorlist", "pacman", "vpn", "textual"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
