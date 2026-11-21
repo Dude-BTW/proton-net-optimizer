@@ -7,8 +7,7 @@ The tray is optional. When PySide6 is not installed in the project virtualenv,
 
 from __future__ import annotations
 
-import os
-import subprocess
+import fcntl
 import sys
 import threading
 from typing import Any
@@ -197,26 +196,14 @@ class Tray(QSystemTrayIcon):
         self._run(label, "pause" if checked else "resume")
 
     def _open_tui(self) -> None:
-        python = os.environ.get("PNO_VENV_PYTHON") or sys.executable
-        command = [
-            self.config.terminal,
-            "-e",
-            python,
-            "-m",
-            "pno",
-            "tui",
-        ]
+        from pno.launcher import open_tui
+
         try:
-            subprocess.Popen(
-                command,
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError as exc:
+            open_tui(self.config)
+        except PnoError as exc:
             self.showMessage(
                 tr("app.title"),
-                tr("tray.open_error", terminal=self.config.terminal, error=exc),
+                tr("tray.open_error", terminal=self.config.terminal, error=exc.message),
                 QSystemTrayIcon.MessageIcon.Critical,
                 6000,
             )
@@ -230,10 +217,25 @@ class Tray(QSystemTrayIcon):
         self.app.quit()
 
 
+def _acquire_single_instance_lock():
+    """Return an open lock handle, or ``None`` when a tray already runs."""
+    paths.ensure_runtime_dir()
+    handle = open(paths.runtime_dir() / "tray.lock", "w", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
 def main() -> int:
     config = config_module.ensure()
     set_language(config.language)
     events.configure(paths.logs_dir(), level=config.log_level)
+    lock = _acquire_single_instance_lock()
+    if lock is None:
+        return 0
     app = QApplication(sys.argv)
     app.setApplicationName("pno-tray")
     app.setQuitOnLastWindowClosed(False)
@@ -245,6 +247,7 @@ def main() -> int:
     code = app.exec()
     tray.hide()
     events.emit("info", "tray", "tray.stop")
+    lock.close()
     return int(code)
 
 

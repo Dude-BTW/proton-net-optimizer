@@ -35,7 +35,7 @@ pno-mirror-apply = "pno.mirrors.apply_helper:main"
 packages = ["pno", "pno.proton", "pno.mirrors", "pno.tui", "pno.tui.i18n", "pno.tray"]
 
 [tool.setuptools.package-data]
-"pno" = ["data/*.toml", "data/*.service", "data/*.desktop"]
+"pno" = ["data/*.toml", "data/*.service", "data/*.desktop", "data/*.svg"]
 "pno.tui" = ["*.tcss"]
 "pno.tray" = ["*.png"]
 

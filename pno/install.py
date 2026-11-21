@@ -23,6 +23,8 @@ HELPER_TARGET = HELPER_LOCATIONS[0]
 SUDOERS_FILE = Path("/etc/sudoers.d/pno-mirror")
 UNIT_NAME = "pno-daemon.service"
 AUTOSTART_NAME = "pno-tray.desktop"
+DESKTOP_NAME = "proton-net-optimizer.desktop"
+ICON_NAME = "proton-net-optimizer.svg"
 BACKUP_DIR = "/var/lib/pno"
 
 
@@ -36,6 +38,22 @@ def repo_root() -> Path:
 def _template(name: str) -> str:
     target = resources.files("pno").joinpath(f"data/{name}")
     return target.read_text(encoding="utf-8")
+
+
+def desktop_dir() -> Path:
+    return Path.home() / ".local" / "share" / "applications"
+
+
+def icon_dir() -> Path:
+    return Path.home() / ".local" / "share" / "icons" / "hicolor" / "scalable" / "apps"
+
+
+def desktop_path() -> Path:
+    return desktop_dir() / DESKTOP_NAME
+
+
+def icon_path() -> Path:
+    return icon_dir() / ICON_NAME
 
 
 def _write_if_changed(path: Path, content: str, *, mode: int = 0o644) -> bool:
@@ -66,6 +84,26 @@ def _sudo(command: list[str], *, timeout: float = 120.0) -> subprocess.Completed
             detail=(completed.stderr or completed.stdout)[-500:],
         )
     return completed
+
+
+def _systemctl_system(*args: str) -> subprocess.CompletedProcess:
+    """Query/control the *system* manager (reflector is a system timer)."""
+    try:
+        return subprocess.run(
+            ["systemctl", *args],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PnoError("systemctl failed", detail=str(exc)) from exc
+
+
+def reflector_timer_active() -> bool:
+    enabled = _systemctl_system("is-enabled", "reflector.timer").stdout.strip()
+    active = _systemctl_system("is-active", "reflector.timer").stdout.strip()
+    return enabled == "enabled" or active == "active"
 
 
 def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -107,6 +145,46 @@ def _sudoers_content(user: str, mirrorlist: str) -> str:
         f"{common}\n"
         f"{common} --pacman-sync\n"
     )
+
+
+def _refresh_desktop_caches() -> list[str]:
+    """Refresh KDE/GNOME caches so the new entry appears immediately."""
+    commands = [
+        ["update-desktop-database", str(desktop_dir())],
+        ["gtk-update-icon-cache", "-f", "-t", str(icon_dir().parents[1])],
+        ["kbuildsycoca6", "--noincremental"],
+    ]
+    ran: list[str] = []
+    for command in commands:
+        if not shutil.which(command[0]):
+            continue
+        try:
+            subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        ran.append(command[0])
+    return ran
+
+
+def _install_desktop(python: str) -> dict[str, Any]:
+    desktop_dir().mkdir(parents=True, exist_ok=True)
+    icon_dir().mkdir(parents=True, exist_ok=True)
+    desktop_text = _template(DESKTOP_NAME).format(python=python)
+    icon_text = _template(ICON_NAME)
+    result = {
+        "desktop": str(desktop_path()),
+        "desktop_changed": _write_if_changed(desktop_path(), desktop_text),
+        "icon": str(icon_path()),
+        "icon_changed": _write_if_changed(icon_path(), icon_text),
+    }
+    result["caches"] = _refresh_desktop_caches()
+    return result
 
 
 def _install_helper(
@@ -202,6 +280,12 @@ def install(
     result["autostart"] = str(autostart_path)
     result["autostart_changed"] = _write_if_changed(autostart_path, autostart_text)
 
+    desktop = _install_desktop(sys.executable)
+    result["desktop"] = desktop["desktop"]
+    result["desktop_changed"] = desktop["desktop_changed"]
+    result["icon"] = desktop["icon"]
+    result["icon_changed"] = desktop["icon_changed"]
+
     try:
         _systemctl("daemon-reload")
         if not no_start:
@@ -215,10 +299,7 @@ def install(
         result.setdefault("errors", []).append(exc.message)
 
     if not keep_reflector:
-        enabled = _systemctl(
-            "is-enabled", "reflector.timer", check=False
-        ).stdout.strip()
-        if enabled == "enabled":
+        if reflector_timer_active():
             if _confirm(
                 "reflector.timer is enabled and may overwrite the mirrorlist. "
                 "Disable it?",
@@ -270,7 +351,7 @@ def uninstall(
     _systemctl("disable", "--now", UNIT_NAME, check=False)
     unit_path = Path.home() / ".config" / "systemd" / "user" / UNIT_NAME
     autostart_path = Path.home() / ".config" / "autostart" / AUTOSTART_NAME
-    for path in (unit_path, autostart_path):
+    for path in (unit_path, autostart_path, desktop_path(), icon_path()):
         try:
             path.unlink()
             result.setdefault("removed", []).append(str(path))
@@ -279,6 +360,7 @@ def uninstall(
         except OSError as exc:
             result.setdefault("errors", []).append(f"{path}: {exc}")
     _systemctl("daemon-reload", check=False)
+    _refresh_desktop_caches()
 
     if SUDOERS_FILE.exists() or HELPER_TARGET.exists():
         if _confirm("Remove the sudo helper and sudoers rule?", assume_yes=assume_yes):

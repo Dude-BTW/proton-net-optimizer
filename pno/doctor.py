@@ -233,6 +233,20 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
             )
         )
 
+    from pno.install import desktop_path, icon_path
+
+    if desktop_path().is_file() and icon_path().is_file():
+        checks.append(_check("desktop entry", LEVEL_OK, str(desktop_path())))
+    else:
+        checks.append(
+            _check(
+                "desktop entry",
+                LEVEL_WARN,
+                "not installed",
+                "Run 'pno install' to add the KDE application-menu entry and icon.",
+            )
+        )
+
     if importlib.util.find_spec("textual") is not None:
         checks.append(_check("textual", LEVEL_OK, "TUI available"))
     else:

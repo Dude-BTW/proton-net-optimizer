@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Proton Net Optimizer
+Name[uk]=Proton Net Optimizer
+GenericName=VPN Server & Mirror Optimizer
+GenericName[uk]=Оптимізатор VPN-серверів і дзеркал
+Comment=Suggest least-loaded Proton VPN servers and refresh Arch Linux mirrors
+Comment[uk]=Пропонує найменш навантажені сервери Proton VPN і оновлює дзеркала Arch Linux
+Exec={python} -m pno launch
+Icon=proton-net-optimizer
+Terminal=false
+Categories=Network;
+Keywords=vpn;proton;arch;mirror;pacman;kitty;
+Keywords[uk]=vpn;proton;arch;дзеркала;pacman;kitty;
+StartupNotify=true
+StartupWMClass=proton-net-optimizer
+NoDisplay=false

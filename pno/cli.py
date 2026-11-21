@@ -107,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     tui = sub.add_parser("tui", help="open the Textual interface")
     _add_json_flag(tui)
 
+    launch = sub.add_parser(
+        "launch", help="open the TUI in the configured terminal (desktop entry)"
+    )
+    _add_json_flag(launch)
+
     tray = sub.add_parser("tray", help="run the tray icon (normally autostarted)")
     _add_json_flag(tray)
     tray.add_argument("--system-python", action="store_true", help=argparse.SUPPRESS)
@@ -254,6 +259,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_daemon(args, config)
     if command == "tui":
         return _cmd_tui(args)
+    if command == "launch":
+        return _cmd_launch(args)
     if command == "tray":
         return _cmd_tray(args)
     raise PnoError("unknown command", detail=command)
@@ -633,6 +640,13 @@ def _cmd_tui(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_launch(args: argparse.Namespace) -> int:
+    from pno.launcher import open_tui
+
+    open_tui(config_module.ensure())
+    return 0
+
+
 def _cmd_tray(args: argparse.Namespace) -> int:
     try:
         from pno.tray.app import main as tray_main
@@ -714,6 +728,14 @@ def _cmd_install(args: argparse.Namespace) -> int:
     print(
         f"Autostart: {result['autostart']} "
         f"({'updated' if result['autostart_changed'] else 'unchanged'})"
+    )
+    print(
+        f"Desktop:   {result.get('desktop')} "
+        f"({'updated' if result.get('desktop_changed') else 'unchanged'})"
+    )
+    print(
+        f"Icon:      {result.get('icon')} "
+        f"({'updated' if result.get('icon_changed') else 'unchanged'})"
     )
     print(f"Service:   {result.get('service')}")
     print(f"Reflector: {result.get('reflector')}")

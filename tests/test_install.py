@@ -22,7 +22,7 @@ def test_unit_template_formats():
     assert "Restart=on-failure" in text
 
 
-def test_desktop_template_formats():
+def test_tray_autostart_template_formats():
     text = _template("pno-tray.desktop").format(python="/venv/bin/python")
     assert "Exec=/venv/bin/python -m pno tray" in text
     assert "Type=Application" in text
@@ -49,3 +49,54 @@ def test_confirm_non_interactive(monkeypatch):
     assert _confirm("q", assume_yes=True) is True
     monkeypatch.setattr("builtins.input", lambda prompt: "")
     assert _confirm("q", assume_yes=False) is False
+
+
+def test_desktop_template_formats():
+    text = _template("proton-net-optimizer.desktop").format(python="/venv/bin/python")
+    assert "Exec=/venv/bin/python -m pno launch" in text
+    assert "Icon=proton-net-optimizer" in text
+    assert "Categories=Network;" in text
+
+
+def test_icon_template_is_svg():
+    text = _template("proton-net-optimizer.svg")
+    assert text.lstrip().startswith("<?xml")
+    assert "<svg" in text
+
+
+def test_install_desktop_files_are_idempotent(tmp_path, monkeypatch):
+    import pno.install as install_module
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(install_module, "_refresh_desktop_caches", lambda: [])
+    first = install_module._install_desktop("/venv/bin/python")
+    second = install_module._install_desktop("/venv/bin/python")
+    assert first["desktop_changed"] is True
+    assert first["icon_changed"] is True
+    assert second["desktop_changed"] is False
+    assert second["icon_changed"] is False
+    assert install_module.desktop_path().is_file()
+    assert install_module.icon_path().is_file()
+    assert "pno launch" in install_module.desktop_path().read_text(encoding="utf-8")
+
+
+def test_reflector_detection_uses_the_system_manager(monkeypatch):
+    import pno.install as install_module
+
+    calls = []
+
+    class Result:
+        def __init__(self, stdout):
+            self.stdout = stdout
+            self.stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[-2:] == ["is-enabled", "reflector.timer"]:
+            return Result("enabled\n")
+        return Result("active\n")
+
+    monkeypatch.setattr(install_module.subprocess, "run", fake_run)
+    assert install_module.reflector_timer_active() is True
+    assert calls[0][0] == "systemctl"
+    assert "--user" not in calls[0]

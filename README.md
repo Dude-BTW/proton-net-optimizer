@@ -10,7 +10,7 @@ you press Connect.
 - Secure Core shown as one aggregate row per exit country
 - Mirror refresh on VPN exit change, on a schedule, and on demand
 - Background daemon with pause/resume, persisted across reboots
-- Tray icon on KDE Plasma / Wayland
+- Tray icon and a KDE application-menu entry on Wayland
 - Machine-readable JSONL event log with a query command
 - Crash-safe: atomic writes, locks, timeouts, retries, no partial files
 
@@ -38,6 +38,10 @@ python3 -m venv .venv
 #   - disables reflector.timer (it would overwrite the mirrorlist)
 .venv/bin/pno install
 ```
+
+Besides the service and helper, this installs:
+- `~/.local/share/applications/proton-net-optimizer.desktop` (KDE menu entry);
+- `~/.local/share/icons/hicolor/scalable/apps/proton-net-optimizer.svg`.
 
 `pno install` asks before touching sudo/systemd configuration. Use flags for a
 non-interactive run:
@@ -68,7 +72,8 @@ pno connect CH-US#3              # explicitly connect (you decide)
 pno mirrors status               # current target country and mirrorlist
 pno mirrors preview              # measure, show diff, write nothing
 pno mirrors refresh              # measure and apply
-pno tui                          # full interface
+pno tui                          # full interface (current terminal)
+pno launch                       # full interface in the configured terminal
 pno tray                         # tray icon (autostarted by pno install)
 pno daemon status|pause|resume|reload|shutdown
 pno logs --level warning --since -2h
@@ -162,6 +167,8 @@ A systemd user service (`pno-daemon.service`):
 | `~/.local/state/proton-net-optimizer/mirror_history.jsonl` | applied plans |
 | `~/.local/state/proton-net-optimizer/logs/events.jsonl` | machine log |
 | `$XDG_RUNTIME_DIR/proton-net-optimizer/daemon.sock` | IPC socket (mode 0600) |
+| `~/.local/share/applications/proton-net-optimizer.desktop` | KDE application-menu entry |
+| `~/.local/share/icons/hicolor/scalable/apps/proton-net-optimizer.svg` | application icon |
 | `/etc/pacman.d/mirrorlist` | generated mirrorlist |
 | `/var/lib/pno/mirrorlist-*.bak` | previous mirrorlists (last 5) |
 
@@ -228,6 +235,13 @@ ignored by the reader.
   standard-library-only, and validates every line. The sudoers rule allows
   exactly the two argument vectors used by `pno` (`--pacman-sync` or not).
 - No credentials are stored; authentication stays inside Proton's own app.
+
+## KDE menu
+
+`pno install` registers **Proton Net Optimizer** under Network/Utilities and
+installs the vector icon. The entry runs `pno launch`, which opens the TUI in
+the terminal configured by the `terminal` key (Kitty by default; Konsole,
+Alacritty, Foot, WezTerm and XTerm are recognised).
 
 ## Development
 

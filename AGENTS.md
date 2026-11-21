@@ -94,9 +94,20 @@ it must never switch servers on its own.
 - `pno/proton/` — helper, cache, status and selection.
 - `pno/mirrors/` — status, probe, planner, apply, root helper.
 - `pno/tui/` — Textual UI and i18n; `pno/tray/` — PySide6 tray.
-- `pno/install.py` — user unit, autostart, sudoers helper.
-- `pno/data/` — inventory, generated country names, unit templates.
+- `pno/install.py` — user unit, autostart, KDE menu entry, icon, sudo helper.
+- `pno/launcher.py` — opens the TUI in the configured terminal (desktop/tray).
+- `pno/data/` — inventory, country names, unit/desktop templates, app icon.
 - `tests/` — offline suite only.
+
+## Git workflow
+- Every implementation task ends with a commit. Run the full check set first.
+- Stage only the files changed by the task. Do not use `git add -A` while
+  unrelated modified or untracked files exist.
+- Never commit `.venv/`, caches, `*.env`, credentials, runtime state, logs, or
+  the installed sudo helper.
+- Commit messages are English and imperative; the body explains what was
+  measured and what changed when it is not obvious.
+- Finish with `git show --stat --oneline HEAD`.
 
 ## Working rules
 - Answer the user in Ukrainian.
@@ -120,3 +131,4 @@ it must never switch servers on its own.
   prompts; errors surface with a typed code and a hint.
 - Pause/resume works with and without the daemon.
 - Re-running the tools changes nothing when nothing needs to change.
+- The change is committed, and the commit contains only files relevant to it.

@@ -56,3 +56,9 @@ def test_uninstall_flags():
     assert args.yes is True
     assert args.purge is True
     assert args.enable_reflector is True
+
+
+def test_launch_command_exists():
+    parser = build_parser()
+    args = parser.parse_args(["launch"])
+    assert args.command == "launch"
