@@ -1,0 +1,252 @@
+# proton-net-optimizer (`pno`)
+
+Suggests the least-loaded Proton VPN servers and keeps the Arch Linux
+`mirrorlist` matched to the country your traffic actually exits from.
+
+The tool **never switches the VPN by itself**. It measures, ranks and shows;
+you press Connect.
+
+- CLI and Textual TUI
+- Secure Core shown as one aggregate row per exit country
+- Mirror refresh on VPN exit change, on a schedule, and on demand
+- Background daemon with pause/resume, persisted across reboots
+- Tray icon on KDE Plasma / Wayland
+- Machine-readable JSONL event log with a query command
+- Crash-safe: atomic writes, locks, timeouts, retries, no partial files
+
+## Requirements
+
+- Arch Linux, KDE Plasma 6, Wayland (X11 should work too)
+- `proton-vpn-gtk-app` (provides the Proton Python libraries and session cache)
+- `protonvpn` CLI (package `proton-vpn-cli`)
+- `networkmanager` + `nmcli`
+- Python 3.11+ (the project runs in its own `.venv`)
+- `pyside6` for the tray icon (already present on most Plasma installs)
+- `sudo` for automatic mirrorlist writes
+
+## Install
+
+```bash
+cd ~/projects/python/proton_net_optimizer
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev,tui]"
+
+# One-time system integration:
+#   - systemd user unit for the daemon
+#   - autostart entry for the tray
+#   - root-owned helper + /etc/sudoers.d/pno-mirror
+#   - disables reflector.timer (it would overwrite the mirrorlist)
+.venv/bin/pno install
+```
+
+`pno install` asks before touching sudo/systemd configuration. Use flags for a
+non-interactive run:
+
+```bash
+pno install --yes                 # install everything
+pno install --no-sudo             # skip automatic mirror writes
+pno install --keep-reflector      # leave reflector.timer enabled
+pno install --no-start            # do not start the daemon now
+```
+
+Uninstall (keeps config and logs by default):
+
+```bash
+pno uninstall          # remove unit, autostart and sudo helper
+pno uninstall --enable-reflector  # restore the weekly reflector timer
+pno uninstall --purge  # also delete config and state/logs
+```
+
+## Usage
+
+```bash
+pno doctor                       # environment diagnostics
+pno servers --top 10             # all countries, least-loaded servers first
+pno servers --country UA,DE      # narrow the view
+pno servers --secure-core        # aggregate Secure Core view
+pno connect CH-US#3              # explicitly connect (you decide)
+pno mirrors status               # current target country and mirrorlist
+pno mirrors preview              # measure, show diff, write nothing
+pno mirrors refresh              # measure and apply
+pno tui                          # full interface
+pno tray                         # tray icon (autostarted by pno install)
+pno daemon status|pause|resume|reload|shutdown
+pno logs --level warning --since -2h
+```
+
+Every command that returns structured data also accepts `--json`.
+
+### TUI
+
+| Tab | Contents |
+| --- | --- |
+| Servers | All countries (best load first) and the top-N least-loaded servers in each |
+| Secure Core | Exit countries from the inventory, best load %, entry countries, route count |
+| Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
+| Logs | Tail of the JSONL event stream |
+| Settings | Top-N, home country, terminal, language (EN/UK) |
+
+Keys: `F5` refresh, `c` connect to the selected row, `p` pause/resume, `Ctrl+Q`
+quit. The current selection is never applied automatically.
+
+## How it works
+
+### Server loads
+
+The Proton CLI does not expose loads, and the REST endpoint requires a session.
+Instead, `pno` runs `pno/proton/fetch_helper.py` with **`/usr/bin/python3`**,
+which already has the Proton libraries installed by `proton-vpn-gtk-app`. The
+helper returns a compact JSON list of all logical servers (name, entry/exit
+country, city, load, score, tier, feature bits). No credentials are read or
+stored by this project.
+
+Fallbacks, in order:
+
+1. helper (fresh loads, same session/cache as the GUI);
+2. `~/.cache/Proton/VPN/serverlist.json` (flagged stale when loads expired);
+3. the last compact cache in `$XDG_STATE_HOME/proton-net-optimizer/servers.json`.
+
+Ranking is `load` ascending, then Proton's `score`, then name. Nothing is
+hard-coded.
+
+### Secure Core
+
+The inventory (`pno/data/inventory.toml`) lists the Secure Core logical servers
+the setup knows about, e.g. `CH-US#3` = entry Switzerland, exit United States.
+The view aggregates by **exit country**: the percentage is the lowest load
+among the eligible routes for that country, and the entry countries and route
+count are shown as details.
+
+### Mirrors
+
+1. Download `https://archlinux.org/mirrors/status/json/` (cached for an hour).
+2. Keep `active` http/https mirrors with `completion_pct >= 0.95`, recent
+   `last_sync`, and `delay <= 24h`. `rsync://` entries are never written:
+   pacman cannot use them.
+3. Candidate pool = mirrors in the target country + the globally best mirrors
+   by Arch score.
+4. Probe each candidate for real: a `Range` request for `core.db` from the
+   current network, two attempts, short timeout.
+5. Rank by measured latency (HTTPS preferred when within 15% of HTTP).
+6. Write the top-N through the privileged helper, atomically, with a backup.
+   If the resulting `Server =` lines are unchanged, the file is not touched.
+
+The target country is the current VPN **exit** country. When disconnected, it
+is `home_country` (default `UA`). Proton uses `UK` where Arch uses `GB`; the
+mapping lives in `pno/data/countries.toml`.
+
+### Daemon
+
+A systemd user service (`pno-daemon.service`):
+
+- polls NetworkManager every 10 s for `ProtonVPN <server>` connection names;
+- refreshes loads every 60 s while running;
+- after an exit-country change (15 s debounce) and every ~12 h ±10% jitter,
+  measures and applies a new mirrorlist;
+- enforces a single concurrent mirror operation;
+- persists pause state, schedule, VPN snapshot and last errors in
+  `state.json`;
+- keeps serving status over a Unix socket in `$XDG_RUNTIME_DIR`.
+
+`pno daemon pause` stops only automatic work; manual commands still run.
+
+## Files
+
+| Path | Purpose |
+| --- | --- |
+| `~/.config/proton-net-optimizer/config.toml` | configuration |
+| `~/.config/proton-net-optimizer/inventory.toml` | optional inventory override |
+| `~/.local/state/proton-net-optimizer/state.json` | shared state |
+| `~/.local/state/proton-net-optimizer/servers.json` | compact server cache |
+| `~/.local/state/proton-net-optimizer/mirrors_status.json` | Arch status cache |
+| `~/.local/state/proton-net-optimizer/mirror_history.jsonl` | applied plans |
+| `~/.local/state/proton-net-optimizer/logs/events.jsonl` | machine log |
+| `$XDG_RUNTIME_DIR/proton-net-optimizer/daemon.sock` | IPC socket (mode 0600) |
+| `/etc/pacman.d/mirrorlist` | generated mirrorlist |
+| `/var/lib/pno/mirrorlist-*.bak` | previous mirrorlists (last 5) |
+
+## Configuration
+
+`config.toml` is flat; unknown keys are ignored.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `top_n` | `10` | servers shown per country |
+| `include_tor` | `false` | include Tor-only servers in suggestions |
+| `home_country` | `"UA"` | mirror target when the VPN is off |
+| `poll_interval` | `10` | VPN state poll, seconds |
+| `loads_interval` | `60` | load refresh interval, seconds |
+| `servers_max_age` | `120` | reuse cached loads younger than this |
+| `auto_mirror` | `true` | enable scheduled/triggered mirror refresh |
+| `auto_mirror_on_vpn_change` | `true` | refresh after the exit country changes |
+| `mirror_debounce_seconds` | `15` | wait for the tunnel to settle |
+| `mirror_interval_hours` | `12` | periodic refresh interval |
+| `mirror_count` | `5` | mirrors written to the list |
+| `mirror_global_candidates` | `20` | global candidates and per-country cap |
+| `mirror_probe_timeout` | `5` | seconds per probe attempt |
+| `mirror_probe_attempts` | `2` | probe attempts per mirror |
+| `mirror_min_completion` | `0.95` | Arch completion threshold |
+| `mirror_max_delay_hours` | `24` | maximum Arch sync delay |
+| `mirror_max_age_hours` | `48` | maximum age of `last_sync` |
+| `mirror_pacman_sync` | `false` | run `pacman -Sy` after applying |
+| `mirrorlist_path` | `/etc/pacman.d/mirrorlist` | target file |
+| `language` | `"en"` | `en` or `uk` |
+| `terminal` | `"kitty"` | terminal used by “Open TUI” in the tray |
+| `log_level` | `"info"` | `debug`, `info`, `warning`, `error` |
+
+## Logs
+
+One JSON object per line:
+
+```json
+{"schema":1,"ts":"2026-11-21T18:00:00.123Z","run_id":"20261121T180000Z-a1b2c3",
+ "seq":42,"pid":1234,"level":"info","component":"mirrors",
+ "event":"mirrors.apply.done","data":{"country":"UA","servers":5},
+ "duration_ms":1530,"error":null}
+```
+
+```bash
+pno logs --level warning --since -24h --json
+pno logs --event 'mirrors.*' --summary
+pno logs --component vpn --limit 50
+```
+
+Rotated at 20 MB into `logs/archive/`. A torn last line (power loss) is
+ignored by the reader.
+
+## Reliability and security
+
+- Every state/cache write is `tmp + fsync + rename`; mirror apply adds a
+  cross-process `flock`.
+- All subprocess and HTTP calls have timeouts; retries use backoff at the
+  daemon level.
+- Offline: operations fail with a typed error, the UI shows data age/staleness;
+  the daemon keeps running and retries.
+- The daemon survives crashes (`Restart=on-failure`); pause state and schedule are
+  persisted.
+- The root helper `/usr/local/lib/pno/pno-mirror-apply` is root-owned,
+  standard-library-only, and validates every line. The sudoers rule allows
+  exactly the two argument vectors used by `pno` (`--pacman-sync` or not).
+- No credentials are stored; authentication stays inside Proton's own app.
+
+## Development
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/ruff check .
+.venv/bin/black --check .
+.venv/bin/isort --check-only .
+.venv/bin/mypy pno
+```
+
+Tests are fully offline: no network, no Proton, no pacman, no sudo.
+
+## Known limitations
+
+- The Proton fetch helper depends on private modules of the installed
+  `proton-vpn-gtk-app`; a future update may require adjusting
+  `pno/proton/fetch_helper.py`. `pno doctor` reports the problem and the cache
+  fallback keeps the UI useful.
+- Loads are as fresh as the last Proton refresh; the UI shows their age.
+- Arch mirror scores are a prior, not a verdict; the measured latency decides.
+- `pno` writes `mirrorlist` only; it does not upgrade packages.

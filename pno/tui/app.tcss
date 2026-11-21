@@ -1,0 +1,131 @@
+Screen {
+    layout: vertical;
+}
+
+#status-bar {
+    height: 3;
+    layout: horizontal;
+    padding: 0 1;
+    align: left middle;
+}
+
+#status-text {
+    width: 1fr;
+    padding: 1 0;
+    color: $text-muted;
+}
+
+#pause-btn,
+#refresh-btn {
+    width: auto;
+    min-width: 12;
+    margin-left: 1;
+}
+
+#tabs {
+    height: 1fr;
+}
+
+TabPane {
+    height: 1fr;
+}
+
+#servers-layout {
+    height: 1fr;
+}
+
+#country-table {
+    width: 2fr;
+    height: 1fr;
+    border: round $accent;
+}
+
+#server-pane {
+    width: 3fr;
+    height: 1fr;
+    margin-left: 1;
+}
+
+#server-table {
+    height: 1fr;
+    border: round $accent;
+}
+
+#server-actions {
+    height: auto;
+    padding: 1 0;
+    align: left middle;
+}
+
+#servers-hint {
+    width: 1fr;
+    padding: 1 1;
+    color: $text-muted;
+}
+
+#secure-layout {
+    height: 1fr;
+}
+
+#secure-table {
+    height: 1fr;
+    border: round $accent;
+}
+
+#secure-actions {
+    height: auto;
+    padding: 1 0;
+}
+
+#mirror-layout {
+    height: 1fr;
+}
+
+#mirror-info {
+    height: auto;
+    padding: 1 1;
+    border: round $accent;
+    margin-bottom: 1;
+}
+
+#mirror-table {
+    height: 1fr;
+    border: round $accent;
+}
+
+#mirror-actions {
+    height: auto;
+    padding: 1 0;
+    align: left middle;
+}
+
+#auto-mirror {
+    width: auto;
+    margin-right: 2;
+}
+
+#log-view {
+    height: 1fr;
+    border: round $accent;
+    padding: 0 1;
+}
+
+#settings-layout {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#settings-layout Label {
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#settings-layout Input,
+#settings-layout Select {
+    width: 40;
+}
+
+#settings-save-btn {
+    margin-top: 2;
+    width: 20;
+}

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Proton Net Optimizer
+Comment=Tray icon for VPN server load suggestions and Arch mirror refresh
+Exec={python} -m pno tray
+Icon=network-vpn
+Terminal=false
+Categories=Network;
+X-GNOME-Autostart-enabled=true
+StartupNotify=false

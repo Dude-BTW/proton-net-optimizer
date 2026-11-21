@@ -1,0 +1,17 @@
+[Unit]
+Description=Proton VPN server and Arch mirror optimizer
+Documentation=file://{repo_root}/README.md
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={python} -m pno daemon run
+WorkingDirectory={repo_root}
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

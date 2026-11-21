@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proton-net-optimizer"
+version = "0.1.0"
+description = "Proton VPN server suggestions and Arch Linux mirror optimization"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+tui = [
+    "textual>=8.2,<9",
+    "rich>=14.2",
+]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "black>=24",
+    "isort>=5",
+    "mypy>=1.11",
+    "textual>=8.2,<9",
+    "rich>=14.2",
+]
+tools = [
+    "babel>=2.14",
+]
+
+[project.scripts]
+pno = "pno.cli:main"
+pno-mirror-apply = "pno.mirrors.apply_helper:main"
+
+[tool.setuptools]
+packages = ["pno", "pno.proton", "pno.mirrors", "pno.tui", "pno.tui.i18n", "pno.tray"]
+
+[tool.setuptools.package-data]
+"pno" = ["data/*.toml", "data/*.service", "data/*.desktop"]
+"pno.tui" = ["*.tcss"]
+"pno.tray" = ["*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E402"]
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+line-length = 88
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true
