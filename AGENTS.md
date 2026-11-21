@@ -96,6 +96,12 @@ it must never switch servers on its own.
 - TUI table filters and search live in `pno/tui/filtering.py`; keep them pure
   and offline-testable. Country flags are emoji (`pno/tui/flags.py`), not
   assets, with a plain-code fallback.
+- The TUI is single-instance: it holds an `flock` and serves a focus socket
+  (`pno/tui/single_instance.py`). Launches from the tray, KDE menu or
+  `pno launch` must focus the existing window, never open a second one.
+- TUI session state (tab, queries, filters, selected rows) is persisted in
+  `tui.json` via `pno/tui/state.py`; save it atomically, debounced, and on
+  unmount.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.

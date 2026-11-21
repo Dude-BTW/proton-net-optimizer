@@ -49,6 +49,7 @@ from pno.tui.filtering import filter_countries, filter_routes
 from pno.tui.flags import country_label, server_label
 from pno.tui.i18n import get_language, set_language, tr
 from pno.tui.modals import GuiConflictScreen
+from pno.tui.state import TAB_IDS, TuiState, TuiStateStore
 
 
 class PnoApp(App[None]):
@@ -70,26 +71,32 @@ class PnoApp(App[None]):
         set_language(self.config.language)
         self.inventory = inventory_module.load()
         self.state_store = StateStore(paths.state_file())
+        self.tui_state_store = TuiStateStore()
+        saved_state = self.tui_state_store.load()
         self.snapshot: ServerSnapshot | None = None
         self.snapshot_mtime: float = 0.0
 
         self.all_countries: list[CountryServers] = []
         self.countries: dict[str, CountryServers] = {}
         self.visible_country_codes: list[str] = []
-        self.selected_country_code: str | None = None
-        self.selected_server: str | None = None
-        self.selected_secure_server: str | None = None
+        self.selected_country_code: str | None = saved_state.selected_country
+        self.selected_server: str | None = saved_state.selected_server
+        self.selected_secure_server: str | None = saved_state.selected_secure_server
         self.secure_route_map: dict[str, Server] = {}
 
-        self.servers_query = ""
-        self.secure_query = ""
-        self.servers_inventory_only = False
-        self.secure_inventory_only = False
+        self.servers_query = saved_state.servers_query
+        self.secure_query = saved_state.secure_query
+        self.servers_inventory_only = saved_state.servers_inventory_only
+        self.secure_inventory_only = saved_state.secure_inventory_only
         self.current_server: str | None = None
+        self._restore_tab = saved_state.tab
+        self._state_dirty = False
+        self._save_scheduled = False
 
         self.remote_status: dict[str, Any] | None = None
         self.mirror_result: dict[str, Any] | None = None
         self._rebuilding = False
+        self._programmatic = False
         self._pending_gui_action: str | None = None
         self._pending_gui_server: str | None = None
 
@@ -106,7 +113,9 @@ class PnoApp(App[None]):
                 with Vertical(id="servers-layout"):
                     with Horizontal(id="servers-filters"):
                         yield Input(
-                            placeholder=tr("servers.search"), id="servers-search"
+                            value=self.servers_query,
+                            placeholder=tr("servers.search"),
+                            id="servers-search",
                         )
                         yield Checkbox(
                             tr("servers.inventory_only"),
@@ -197,6 +206,9 @@ class PnoApp(App[None]):
         self._load_mirror_overview()
         self._refresh_status()
         self._refresh_logs()
+        tabs = self.query_one("#tabs", TabbedContent)
+        if self._restore_tab in TAB_IDS:
+            tabs.active = self._restore_tab
         self.set_interval(3.0, self._tick)
         self._refresh_servers_worker(force=False)
         self._remote_status_worker()
@@ -284,7 +296,11 @@ class PnoApp(App[None]):
             else self.visible_country_codes[0]
         )
         index = self.visible_country_codes.index(selected)
-        table.move_cursor(row=index)
+        self._programmatic = True
+        try:
+            table.move_cursor(row=index)
+        finally:
+            self._programmatic = False
         self.selected_country_code = selected
         self._populate_servers(selected)
 
@@ -300,9 +316,10 @@ class PnoApp(App[None]):
             tr("servers.city"),
             tr("servers.tags"),
         )
-        self.selected_server = None
+        desired = self.selected_server
         country = self.countries.get(code or "")
         if country is None:
+            self.selected_server = None
             return
         self._rebuilding = True
         try:
@@ -328,8 +345,14 @@ class PnoApp(App[None]):
         finally:
             self._rebuilding = False
         if country.servers:
-            table.move_cursor(row=0)
-            self.selected_server = country.servers[0].name
+            names = [server.name for server in country.servers]
+            index = names.index(desired) if desired in names else 0
+            self._programmatic = True
+            try:
+                table.move_cursor(row=index)
+            finally:
+                self._programmatic = False
+            self.selected_server = names[index]
 
     def _populate_secure_core(self) -> None:
         table = self.query_one("#secure-table", DataTable)
@@ -385,7 +408,11 @@ class PnoApp(App[None]):
         selected = self.selected_secure_server
         names = [route.name for route in visible]
         index = names.index(selected) if selected in names else 0
-        table.move_cursor(row=index)
+        self._programmatic = True
+        try:
+            table.move_cursor(row=index)
+        finally:
+            self._programmatic = False
         self.selected_secure_server = visible[index].name
 
     def _update_filter_count(self, widget_id: str, shown: int, total: int) -> None:
@@ -541,6 +568,8 @@ class PnoApp(App[None]):
     def _tick(self) -> None:
         self._load_snapshot_from_disk()
         self._refresh_status()
+        if self._state_dirty:
+            self._flush_state()
         tabs = self.query_one("#tabs", TabbedContent)
         if tabs.active == "tab-logs":
             self._refresh_logs()
@@ -732,46 +761,53 @@ class PnoApp(App[None]):
     # --------------------------------------------------------------- actions
     @on(DataTable.RowHighlighted, "#country-table")
     def _on_country_highlight(self, event: DataTable.RowHighlighted) -> None:
-        if self._rebuilding:
+        if self._rebuilding or self._programmatic:
             return
         code = event.row_key.value
         if code:
             self.selected_country_code = str(code)
             self._populate_servers(str(code))
+            self._mark_state_dirty()
 
     @on(DataTable.RowHighlighted, "#server-table")
     def _on_server_highlight(self, event: DataTable.RowHighlighted) -> None:
-        if self._rebuilding:
+        if self._rebuilding or self._programmatic:
             return
         if event.row_key.value:
             self.selected_server = str(event.row_key.value)
+            self._mark_state_dirty()
 
     @on(DataTable.RowHighlighted, "#secure-table")
     def _on_secure_highlight(self, event: DataTable.RowHighlighted) -> None:
-        if self._rebuilding:
+        if self._rebuilding or self._programmatic:
             return
         if event.row_key.value:
             self.selected_secure_server = str(event.row_key.value)
+            self._mark_state_dirty()
 
     @on(Input.Changed, "#servers-search")
     def _on_servers_search(self, event: Input.Changed) -> None:
         self.servers_query = event.value
         self._populate_countries()
+        self._mark_state_dirty()
 
     @on(Checkbox.Changed, "#servers-inventory")
     def _on_servers_inventory(self, event: Checkbox.Changed) -> None:
         self.servers_inventory_only = bool(event.value)
         self._populate_countries()
+        self._mark_state_dirty()
 
     @on(Input.Changed, "#secure-search")
     def _on_secure_search(self, event: Input.Changed) -> None:
         self.secure_query = event.value
         self._populate_secure_core()
+        self._mark_state_dirty()
 
     @on(Checkbox.Changed, "#secure-inventory")
     def _on_secure_inventory(self, event: Checkbox.Changed) -> None:
         self.secure_inventory_only = bool(event.value)
         self._populate_secure_core()
+        self._mark_state_dirty()
 
     @on(Button.Pressed, "#connect-btn")
     def _on_connect(self) -> None:
@@ -821,6 +857,13 @@ class PnoApp(App[None]):
             "info", "tui", "settings.auto_mirror", {"enabled": self.config.auto_mirror}
         )
 
+    @on(TabbedContent.TabActivated)
+    def _on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        tabs = self.query_one("#tabs", TabbedContent)
+        if tabs.active in TAB_IDS:
+            self._restore_tab = tabs.active
+            self._mark_state_dirty()
+
     @on(Select.Changed, "#language")
     def _on_language(self, event: Select.Changed) -> None:
         value = str(event.value)
@@ -855,6 +898,7 @@ class PnoApp(App[None]):
         self.config = updated
         self._populate_countries()
         self._reload_daemon_config()
+        self._mark_state_dirty()
         self.notify(tr("settings.saved"))
 
     def _reload_daemon_config(self) -> None:
@@ -900,6 +944,46 @@ class PnoApp(App[None]):
             self.notify(tr("notify.daemon_offline"), severity="warning")
         self.notify(tr("notify.paused" if command == "pause" else "notify.resumed"))
         self._refresh_status()
+
+    # -------------------------------------------------------------- session
+    def _mark_state_dirty(self) -> None:
+        self._state_dirty = True
+        if not self._save_scheduled:
+            self._save_scheduled = True
+            self.set_timer(0.4, self._flush_state_from_timer)
+
+    def _flush_state_from_timer(self) -> None:
+        self._save_scheduled = False
+        self._flush_state()
+
+    def _flush_state(self) -> None:
+        try:
+            active = self.query_one("#tabs", TabbedContent).active
+        except Exception:  # noqa: BLE001 - widget tree may be gone on unmount
+            active = self._restore_tab
+        if active in TAB_IDS:
+            self._restore_tab = active
+        state = TuiState(
+            tab=self._restore_tab,
+            servers_query=self.servers_query,
+            secure_query=self.secure_query,
+            servers_inventory_only=self.servers_inventory_only,
+            secure_inventory_only=self.secure_inventory_only,
+            selected_country=self.selected_country_code,
+            selected_server=self.selected_server,
+            selected_secure_server=self.selected_secure_server,
+        )
+        if not self.tui_state_store.save(state):
+            events.emit(
+                "warning",
+                "tui",
+                "tui.state.save-failed",
+                {"path": str(self.tui_state_store.path)},
+            )
+        self._state_dirty = False
+
+    def on_unmount(self) -> None:
+        self._flush_state()
 
     # ------------------------------------------------------------ retranslate
     def _retranslate(self) -> None:
@@ -959,7 +1043,20 @@ class PnoApp(App[None]):
 
 
 def run() -> None:
-    PnoApp().run()
+    from pno.tui.single_instance import TuiInstance
+
+    instance = TuiInstance()
+    if not instance.acquire():
+        focused = instance.focus_existing()
+        print(
+            "pno: TUI is already running"
+            + ("; focused the existing window." if focused else ".")
+        )
+        return
+    try:
+        PnoApp().run()
+    finally:
+        instance.close()
 
 
 if __name__ == "__main__":

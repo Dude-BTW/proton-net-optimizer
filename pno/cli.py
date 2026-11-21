@@ -717,7 +717,9 @@ def _cmd_tui(args: argparse.Namespace) -> int:
 def _cmd_launch(args: argparse.Namespace) -> int:
     from pno.launcher import open_tui
 
-    open_tui(config_module.ensure())
+    process = open_tui(config_module.ensure())
+    if process is None:
+        print("TUI is already running; focused the existing window.")
     return 0
 
 

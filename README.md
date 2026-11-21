@@ -10,6 +10,8 @@ you press Connect.
 - Country flags, search and an "inventory only" filter in both server views
 - Secure Core: every route in the TUI, aggregates per exit country in the CLI
 - Explicit Disconnect button and CLI command
+- Single-instance TUI: the tray raises the existing window instead of opening a second one
+- Remembers the active tab, search, filters and selected rows across restarts
 - Detects a running Proton VPN GUI and offers to close it before connecting
 - Mirror refresh on VPN exit change, on a schedule, and on demand
 - Background daemon with pause/resume, persisted across reboots
@@ -102,6 +104,17 @@ Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
 `p` pause/resume, `Ctrl+Q` quit. The current selection is never applied
 automatically.
 
+The TUI is single-instance. Opening it again from the tray, the KDE menu or
+`pno launch` focuses the existing terminal window (via kitty's control socket,
+then `kdotool`, `wmctrl` or `xdotool`). It never opens a second window; if the
+window cannot be raised, a desktop notification says the TUI is already
+running.
+
+Session state (active tab, both search queries, inventory checkboxes and the
+selected country/server/Secure Core route) is stored in
+`~/.local/state/proton-net-optimizer/tui.json` and restored on the next launch.
+It is written atomically and debounced, and flushed on exit.
+
 Search is case-insensitive; several words are combined with AND. It matches
 country codes and names (EN/UK), load values, server counts, server names and
 cities. The “Inventory only” checkbox uses `pno/data/inventory.toml`:
@@ -183,6 +196,7 @@ A systemd user service (`pno-daemon.service`):
 | `~/.local/state/proton-net-optimizer/servers.json` | compact server cache |
 | `~/.local/state/proton-net-optimizer/mirrors_status.json` | Arch status cache |
 | `~/.local/state/proton-net-optimizer/mirror_history.jsonl` | applied plans |
+| `~/.local/state/proton-net-optimizer/tui.json` | last TUI tab, search, filters and selection |
 | `~/.local/state/proton-net-optimizer/logs/events.jsonl` | machine log |
 | `$XDG_RUNTIME_DIR/proton-net-optimizer/daemon.sock` | IPC socket (mode 0600) |
 | `~/.local/share/applications/proton-net-optimizer.desktop` | KDE application-menu entry |
@@ -249,6 +263,8 @@ ignored by the reader.
   the daemon keeps running and retries.
 - The daemon survives crashes (`Restart=on-failure`); pause state and schedule are
   persisted.
+- The TUI holds an `flock` in `$XDG_RUNTIME_DIR` and serves a focus socket, so
+  concurrent launches cannot create duplicate windows.
 - The root helper `/usr/local/lib/pno/pno-mirror-apply` is root-owned,
   standard-library-only, and validates every line. The sudoers rule allows
   exactly the two argument vectors used by `pno` (`--pacman-sync` or not).

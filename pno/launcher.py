@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pno import paths
 from pno.config import Config
 from pno.errors import PnoError
 
@@ -31,6 +32,7 @@ def build_terminal_command(
     *,
     title: str = WINDOW_TITLE,
     working_directory: Path | None = None,
+    kitty_listen_on: Path | None = None,
 ) -> list[str]:
     """Build an argv that runs ``pno tui`` inside the configured terminal."""
     terminal = config.terminal
@@ -56,6 +58,8 @@ def build_terminal_command(
             "--directory",
             str(cwd),
         ]
+        if kitty_listen_on is not None:
+            command += ["--listen-on", f"unix:{kitty_listen_on}"]
     elif name == "konsole":
         command += ["--title", title, "--workdir", str(cwd)]
     elif name == "alacritty":
@@ -82,10 +86,33 @@ def open_tui(
     *,
     python: str | None = None,
     title: str = WINDOW_TITLE,
-) -> subprocess.Popen[bytes]:
-    """Launch the TUI detached from the caller (tray or desktop entry)."""
+) -> subprocess.Popen[bytes] | None:
+    """Focus an existing TUI, or launch one detached.
+
+    Returns ``None`` when an existing window was focused and no new terminal
+    was started.
+    """
+    from pno.tui.single_instance import focus_running_tui
+
+    if focus_running_tui():
+        return None
+
     interpreter = python or os.environ.get("PNO_VENV_PYTHON") or sys.executable
-    command = build_terminal_command(config, interpreter, title=title)
+    runtime = paths.runtime_dir()
+    runtime.mkdir(parents=True, exist_ok=True)
+    try:
+        runtime.chmod(0o700)
+    except OSError:
+        pass
+    kitty_socket = runtime / f"kitty-{os.getpid()}.sock"
+    command = build_terminal_command(
+        config,
+        interpreter,
+        title=title,
+        kitty_listen_on=kitty_socket,
+    )
+    environment = dict(os.environ)
+    environment["PNO_KITTY_LISTEN_ON"] = str(kitty_socket)
     try:
         return subprocess.Popen(
             command,
@@ -94,6 +121,7 @@ def open_tui(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
+            env=environment,
         )
     except OSError as exc:
         raise PnoError(

@@ -154,3 +154,35 @@ def test_gui_conflict_modal_can_be_cancelled(monkeypatch):
         set_language("en")
 
     asyncio.run(scenario())
+
+
+def test_tui_session_state_is_restored(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        first = _TestApp()
+        async with first.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            first._on_servers_search(SimpleNamespace(value="Frankfurt"))
+            first._on_servers_inventory(SimpleNamespace(value=True))
+            first._on_secure_inventory(SimpleNamespace(value=True))
+            first._on_secure_search(SimpleNamespace(value="CH-US"))
+            first.query_one("#tabs", TabbedContent).active = "tab-secure"
+            await pilot.pause()
+            first._flush_state()
+
+        second = _TestApp()
+        async with second.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            assert second.servers_query == "Frankfurt"
+            assert second.servers_inventory_only is True
+            assert second.secure_query == "CH-US"
+            assert second.secure_inventory_only is True
+            assert second.selected_country_code == "DE"
+            assert second.selected_server == "DE#1"
+            assert second.selected_secure_server == "CH-US#3"
+            assert second.query_one("#tabs", TabbedContent).active == "tab-secure"
+        set_language("en")
+
+    asyncio.run(scenario())

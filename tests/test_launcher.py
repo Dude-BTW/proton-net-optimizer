@@ -68,3 +68,28 @@ def test_open_tui_uses_the_venv_interpreter(monkeypatch):
     launcher.open_tui(Config(terminal="kitty"))
     assert recorded["command"][-5:] == ["-e", "/venv/bin/python", "-m", "pno", "tui"]
     assert recorded["kwargs"]["start_new_session"] is True
+    assert "PNO_KITTY_LISTEN_ON" in recorded["kwargs"]["env"]
+    assert "--listen-on" in recorded["command"]
+
+
+def test_open_tui_focuses_an_existing_window(monkeypatch):
+    from pno.tui import single_instance
+
+    monkeypatch.setattr(single_instance, "focus_running_tui", lambda: True)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a second terminal must not be started")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", fail)
+    assert launcher.open_tui(Config(terminal="kitty")) is None
+
+
+def test_kitty_command_can_include_a_listen_socket(tmp_path):
+    command = launcher.build_terminal_command(
+        Config(terminal="kitty"),
+        "/venv/bin/python",
+        working_directory=Path("/repo"),
+        kitty_listen_on=tmp_path / "kitty.sock",
+    )
+    assert "--listen-on" in command
+    assert command[command.index("--listen-on") + 1].startswith("unix:")
