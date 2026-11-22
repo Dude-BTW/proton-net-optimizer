@@ -12,6 +12,8 @@ you press Connect.
 - CLI and Textual TUI
 - Country flags, search and a "favorites only" filter in both server views
 - Personal Favorites tab with a visual checklist and a validated text editor
+- A Proton VPN tab that edits the settings the GUI writes (account, NetShield,
+  kill switch, port forwarding, split tunneling, protocol, DNS, telemetry)
 - Secure Core: every route in the TUI, aggregates per exit country in the CLI
 - Explicit Disconnect button and CLI command
 - Single-instance TUI: the tray raises the existing window instead of opening a second one
@@ -86,6 +88,12 @@ pno favorites list               # show personal favorites
 pno favorites add UA CH-US#3      # validate and add entries
 pno favorites set --file f.txt    # replace from one entry per line
 pno favorites clear              # remove all favorites
+pno vpn settings                 # show the settings Proton itself uses
+pno vpn set netshield malware-ads-trackers
+pno vpn set kill-switch standard
+pno vpn set protocol smart       # or wireguard, openvpn-udp, ...
+pno vpn set split-tunneling on --mode exclude --app /usr/bin/zoom
+pno vpn set custom-dns on --dns 1.1.1.1,9.9.9.9
 pno connect CH-US#3              # explicitly connect (you decide)
 pno connect CH-US#3 --close-gui  # close a running Proton GUI, then connect
 pno disconnect                   # disconnect now
@@ -111,7 +119,8 @@ Every command that returns structured data also accepts `--json`.
 | Favorites | Personal regular countries and Secure Core routes; visual checklist on the left, validated text editor on the right |
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
 | Logs | Tail of the JSONL event stream plus editable retention limits |
-| Settings | Top-N, home country, terminal, language (EN/UK) |
+| Proton VPN | Account, NetShield, kill switch, port forwarding, split tunneling, protocol, VPN Accelerator, Moderate NAT, IPv6, custom DNS, telemetry, crash reports; GUI-only preferences are shown read-only |
+| Application | Top-N, home country, terminal, language (EN/UK) |
 
 Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
 `p` pause/resume, `Ctrl+Q` quit. The current selection is never applied
@@ -210,6 +219,47 @@ The target country is the current VPN **exit** country. When disconnected, it
 is `home_country` (default `UA`). Proton uses `UK` where Arch uses `GB`; the
 mapping lives in `pno/data/countries.toml`.
 
+### Proton VPN settings
+
+`pno` edits the same file as the Proton VPN GUI and CLI:
+`$XDG_CONFIG_HOME/Proton/VPN/settings.json`. Nothing is copied into this
+repository, and no credential is stored or printed.
+
+| pno command | Proton key |
+| --- | --- |
+| `pno vpn set netshield …` | `features.netshield` |
+| `pno vpn set kill-switch …` | `killswitch` (through `protonvpn config set`) |
+| `pno vpn set port-forwarding …` | `features.port_forwarding` |
+| `pno vpn set split-tunneling …` | `features.split_tunneling.*` |
+| `pno vpn set protocol …` | `protocol` |
+| `pno vpn set vpn-accelerator …` | `features.vpn_accelerator` |
+| `pno vpn set moderate-nat …` | `features.moderate_nat` |
+| `pno vpn set ipv6 …` | `ipv6` |
+| `pno vpn set custom-dns …` | `custom_dns.enabled`, `custom_dns.ip_list` |
+| `pno vpn set telemetry …` | `telemetry` |
+| `pno vpn set crash-reports …` | `anonymous_crash_reports` |
+
+Rules that mirror Proton's own GUI:
+
+- writes are refused while the Proton VPN GUI is running, because it caches
+  settings in memory and could overwrite them;
+- kill switch, protocol and split tunneling can only change while disconnected;
+- NetShield and custom DNS are mutually exclusive: enabling one disables the
+  other and reports a warning;
+- split tunneling warns when the kill switch is on, when no application is
+  selected, or when an application path does not exist;
+- paid features are refused on a free plan when the plan is known;
+- only the keys the user changes are written; unknown keys are preserved and a
+  no-op change never touches the file;
+- a malformed `settings.json` is reported and never overwritten.
+
+Changes apply on the next connection; `pno` never reconnects on its own.
+Kill switch changes go through `protonvpn config set` so the firewall state is
+applied immediately. Advanced kill switch and the troubleshooting packet
+capture remain GUI-only. Auto-connect, start-minimized and pinned tray
+connections are shown read-only: `pno` never connects without an explicit
+action.
+
 ### Daemon
 
 A systemd user service (`pno-daemon.service`):
@@ -233,7 +283,11 @@ User-specific data never lives in the repository:
 - configuration: `~/.config/proton-net-optimizer/config.toml`;
 - TUI session state, server/mirror caches and logs:
   `~/.local/state/proton-net-optimizer/`;
-- daemon socket: `$XDG_RUNTIME_DIR/proton-net-optimizer/`.
+- daemon socket: `$XDG_RUNTIME_DIR/proton-net-optimizer/`;
+- Proton's own settings, read or written only on explicit request:
+  `~/.config/Proton/VPN/settings.json` and `app-config.json`. These are
+  Proton's files, never part of this repository, and split-tunneling paths or
+  pinned servers are never logged.
 
 The repository ships an empty favorites template and `.gitignore` covers the
 common local paths. Back up the configuration directory if you want to keep
@@ -251,6 +305,8 @@ your favorites and settings.
 | `~/.local/state/proton-net-optimizer/mirror_history.jsonl` | applied plans |
 | `~/.local/state/proton-net-optimizer/tui.json` | last TUI tab, search, filters and selection |
 | `~/.local/state/proton-net-optimizer/logs/events.jsonl` | machine log |
+| `~/.config/Proton/VPN/settings.json` | Proton VPN settings (owned by Proton; pno edits on request) |
+| `~/.config/Proton/VPN/app-config.json` | Proton GUI preferences (read-only for pno) |
 | `$XDG_RUNTIME_DIR/proton-net-optimizer/daemon.sock` | IPC socket (mode 0600) |
 | `~/.local/share/applications/proton-net-optimizer.desktop` | KDE application-menu entry |
 | `~/.local/share/icons/hicolor/scalable/apps/proton-net-optimizer.svg` | application icon |
@@ -399,3 +455,9 @@ combination unambiguous.
 - Loads are as fresh as the last Proton refresh; the UI shows their age.
 - Arch mirror scores are a prior, not a verdict; the measured latency decides.
 - `pno` writes `mirrorlist` only; it does not upgrade packages.
+- Proton VPN settings written by `pno` apply on the next connection; `pno`
+  never reconnects. Advanced kill switch, troubleshooting packet capture and
+  auto-connect stay in the Proton VPN GUI.
+- Split tunneling is a Proton GUI feature; `pno` writes the same JSON keys, but
+  Proton may change or reset that format between releases. It works only while
+  the kill switch is off and requires a paid plan.

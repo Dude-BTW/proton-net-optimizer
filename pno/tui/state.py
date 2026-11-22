@@ -21,6 +21,7 @@ TAB_IDS = (
     "tab-favorites",
     "tab-mirrors",
     "tab-logs",
+    "tab-proton",
     "tab-settings",
 )
 

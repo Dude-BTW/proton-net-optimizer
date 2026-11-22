@@ -9,6 +9,7 @@ from textual.widgets import (
     Checkbox,
     DataTable,
     Input,
+    Select,
     SelectionList,
     Static,
     TabbedContent,
@@ -34,6 +35,9 @@ class _TestApp(tui_app.PnoApp):
         return None
 
     def _requirements_worker(self) -> None:  # type: ignore[override]
+        return None
+
+    def _proton_info_worker(self) -> None:  # type: ignore[override]
         return None
 
 
@@ -384,6 +388,302 @@ def test_favorites_revert_restores_last_saved_state(monkeypatch):
             assert app.favorites_dirty_side is None
             assert text.text == original
             assert app.query_one("#favorites-list", SelectionList).disabled is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def seed_proton_settings() -> None:
+    target = paths.proton_settings_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "protocol": "protun-smart",
+                "killswitch": 0,
+                "ipv6": True,
+                "telemetry": False,
+                "anonymous_crash_reports": False,
+                "features": {
+                    "netshield": 2,
+                    "vpn_accelerator": True,
+                    "moderate_nat": False,
+                    "port_forwarding": False,
+                    "split_tunneling": {
+                        "enabled": False,
+                        "mode": "exclude",
+                        "config_by_mode": {
+                            "exclude": {
+                                "mode": "exclude",
+                                "app_paths": [],
+                                "ip_ranges": [],
+                            },
+                            "include": {
+                                "mode": "include",
+                                "app_paths": [],
+                                "ip_ranges": [],
+                            },
+                        },
+                    },
+                },
+                "custom_dns": {"enabled": False, "ip_list": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_tui_proton_tab_loads_proton_settings(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            tabs = app.query_one("#tabs", TabbedContent)
+            assert tabs.get_tab("tab-proton")
+            tabs.active = "tab-proton"
+            await pilot.pause()
+            assert app.query_one("#proton-netshield", Select).value == (
+                "malware-ads-trackers"
+            )
+            assert app.query_one("#proton-killswitch", Select).value == "off"
+            assert app.query_one("#proton-protocol", Select).value == "protun-smart"
+            assert app.query_one("#proton-telemetry", Checkbox).value is False
+            assert app.query_one("#proton-account", Static).content == tr(
+                "proton.account.none"
+            )
+            assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_protocol_family_toggle(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            protun = app.query_one("#proton-protun", Checkbox)
+            protocol = app.query_one("#proton-protocol", Select)
+            assert protun.value is True
+            assert protocol.value == "protun-smart"
+            protun.value = False
+            await pilot.pause()
+            assert protocol.value == "wireguard"
+            assert app._proton_dirty is True
+            protun.value = True
+            await pilot.pause()
+            assert protocol.value == "protun-smart"
+            assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_split_mode_loads_its_own_app_list(monkeypatch):
+    seed_servers()
+    target = paths.proton_settings_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "protocol": "wireguard",
+                "features": {
+                    "split_tunneling": {
+                        "enabled": True,
+                        "mode": "exclude",
+                        "config_by_mode": {
+                            "exclude": {
+                                "mode": "exclude",
+                                "app_paths": ["/usr/bin/a"],
+                                "ip_ranges": [],
+                            },
+                            "include": {
+                                "mode": "include",
+                                "app_paths": ["/usr/bin/b"],
+                                "ip_ranges": [],
+                            },
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            apps = app.query_one("#proton-split-apps", TextArea)
+            mode = app.query_one("#proton-split-mode", Select)
+            assert apps.text == "/usr/bin/a"
+            mode.value = "include"
+            await pilot.pause()
+            assert apps.text == "/usr/bin/b"
+            mode.value = "exclude"
+            await pilot.pause()
+            assert apps.text == "/usr/bin/a"
+            assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_apply_writes_changes(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.query_one("#proton-netshield", Select).value = "malware-only"
+            app.query_one("#proton-ipv6", Checkbox).value = False
+            await pilot.pause()
+            assert app._proton_dirty is True
+            app._apply_proton()
+            await pilot.pause()
+            raw = json.loads(paths.proton_settings_file().read_text(encoding="utf-8"))
+            assert raw["features"]["netshield"] == 1
+            assert raw["ipv6"] is False
+            assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_revert_restores_the_file_values(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            select = app.query_one("#proton-netshield", Select)
+            select.value = "off"
+            await pilot.pause()
+            assert app._proton_dirty is True
+            app._revert_proton()
+            await pilot.pause()
+            assert select.value == "malware-ads-trackers"
+            assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_disconnected_only_controls_are_locked(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.remote_status = {"vpn": {"connected": True, "server_name": "UA#1"}}
+            app._refresh_status()
+            await pilot.pause()
+            assert app.query_one("#proton-killswitch", Select).disabled is True
+            assert app.query_one("#proton-protocol", Select).disabled is True
+            assert app.query_one("#proton-netshield", Select).disabled is False
+            assert app.query_one("#proton-apply-btn", Button).disabled is True
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_tab_is_translated(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.config.language = "uk"
+            app._retranslate()
+            await pilot.pause()
+            tabs = app.query_one("#tabs", TabbedContent)
+            assert str(tabs.get_tab("tab-proton").label) == tr("tab.proton")
+            assert str(app.query_one("#proton-apply-btn", Button).label) == tr(
+                "proton.apply"
+            )
+            assert str(app.query_one("#proton-ipv6", Checkbox).label) == tr(
+                "proton.ipv6"
+            )
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_running_app_modal_adds_an_executable(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+    from pno.tui import modals
+
+    monkeypatch.setattr(
+        modals,
+        "list_running_executables",
+        lambda *a, **k: ("/usr/bin/alpha", "/usr/bin/beta"),
+    )
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.push_screen(tui_app.RunningAppScreen(), app._on_running_app_selected)
+            await pilot.pause()
+            listing = app.screen.query_one("#running-app-list")
+            assert listing.option_count == 2
+            await pilot.press("enter")
+            await pilot.pause()
+            text = app.query_one("#proton-split-apps", TextArea).text
+            assert "/usr/bin/alpha" in text
+            assert app._proton_dirty is True
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_gui_running_blocks_editing(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [object()])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app._load_proton_settings()
+            await pilot.pause()
+            assert app.query_one("#proton-apply-btn", Button).disabled is True
+            banner = str(app.query_one("#proton-banner", Static).content)
+            assert banner == tr("proton.gui_running")
+            assert app.query_one("#proton-netshield", Select).disabled is True
         set_language("en")
 
     asyncio.run(scenario())

@@ -66,6 +66,28 @@ def logs_dir() -> Path:
     return state_dir() / "logs"
 
 
+def proton_config_dir() -> Path:
+    """Directory owned by the Proton VPN applications.
+
+    pno only reads and writes the settings files that Proton itself uses. The
+    location mirrors ``VPNExecutionEnvironment.path_config`` (XDG config home
+    plus ``Proton/VPN``); an explicit override exists for tests and portable
+    installs.
+    """
+    override = os.environ.get("PNO_PROTON_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+    return _xdg("XDG_CONFIG_HOME", "~/.config") / "Proton" / "VPN"
+
+
+def proton_settings_file() -> Path:
+    return proton_config_dir() / "settings.json"
+
+
+def proton_app_config_file() -> Path:
+    return proton_config_dir() / "app-config.json"
+
+
 def config_file() -> Path:
     return config_dir() / "config.toml"
 

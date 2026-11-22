@@ -153,6 +153,53 @@ def build_parser() -> argparse.ArgumentParser:
             "--stdin", action="store_true", help="read entries from stdin"
         )
 
+    vpn = sub.add_parser("vpn", help="read or change Proton VPN settings")
+    _add_json_flag(vpn)
+    vpn_sub = vpn.add_subparsers(dest="vpn_command", required=True)
+    vpn_show = vpn_sub.add_parser("settings", help="show Proton VPN settings")
+    _add_json_flag(vpn_show)
+    vpn_show.add_argument(
+        "--no-account", action="store_true", help="do not read the Proton account"
+    )
+    vpn_set = vpn_sub.add_parser("set", help="change one Proton VPN setting")
+    _add_json_flag(vpn_set)
+    vpn_set.add_argument(
+        "vpn_key",
+        choices=[
+            "netshield",
+            "kill-switch",
+            "port-forwarding",
+            "split-tunneling",
+            "protocol",
+            "vpn-accelerator",
+            "moderate-nat",
+            "ipv6",
+            "custom-dns",
+            "telemetry",
+            "crash-reports",
+        ],
+        help="setting to change",
+    )
+    vpn_set.add_argument("value", help="new value")
+    vpn_set.add_argument(
+        "--dns", help="custom DNS servers, comma separated (with custom-dns)"
+    )
+    vpn_set.add_argument(
+        "--mode",
+        choices=["exclude", "include"],
+        help="split tunneling mode (with split-tunneling)",
+    )
+    vpn_set.add_argument(
+        "--app",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help="application path for split tunneling (repeatable, replaces the list)",
+    )
+    vpn_set.add_argument(
+        "--dry-run", action="store_true", help="validate without writing anything"
+    )
+
     tui = sub.add_parser("tui", help="open the Textual interface")
     _add_json_flag(tui)
 
@@ -307,6 +354,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_mirrors(args, config)
     if command == "daemon":
         return _cmd_daemon(args, config)
+    if command == "vpn":
+        return _cmd_vpn(args, config)
     if command == "tui":
         return _cmd_tui(args)
     if command == "launch":
@@ -638,6 +687,217 @@ def _cmd_favorites(args: argparse.Namespace, config: Config) -> int:
         print(f"Secure Core: {', '.join(updated.secure_core_servers) or '-'}")
         for warning in parsed.warnings:
             print(f"warning: {warning}")
+    return 0
+
+
+# ------------------------------------------------------------------------ vpn
+_VPN_FIELDS = {
+    "netshield": "netshield",
+    "port-forwarding": "port_forwarding",
+    "protocol": "protocol",
+    "vpn-accelerator": "vpn_accelerator",
+    "moderate-nat": "moderate_nat",
+    "ipv6": "ipv6",
+    "telemetry": "telemetry",
+    "crash-reports": "anonymous_crash_reports",
+}
+
+
+def _vpn_connection_state() -> tuple[bool, str | None]:
+    """Return (connected, warning). Unknown state is treated as connected."""
+    try:
+        return read_vpn_status(None).connected, None
+    except PnoError as exc:
+        return True, f"cannot determine the VPN state: {exc.message}"
+
+
+def _vpn_gui_running() -> bool:
+    from pno.proton.gui import find_gui_processes
+
+    return bool(find_gui_processes())
+
+
+def _vpn_catalog_info(no_account: bool = False):
+    from pno.proton.account import ProtonInfo, try_fetch_info
+
+    if no_account:
+        return ProtonInfo(), []
+    info, error = try_fetch_info()
+    warnings = [error] if error else []
+    if not info.protocols and not error:
+        warnings.append("the Proton protocol list is unavailable; using built-in IDs")
+    return info, warnings
+
+
+def _on_off(value: bool) -> str:
+    return "on" if value else "off"
+
+
+def _cmd_vpn(args: argparse.Namespace, config: Config) -> int:
+    sub = args.vpn_command
+    if sub == "settings":
+        return _cmd_vpn_settings(args, config)
+    if sub == "set":
+        return _cmd_vpn_set(args, config)
+    raise PnoError("unknown vpn command", detail=sub)
+
+
+def _cmd_vpn_settings(args: argparse.Namespace, config: Config) -> int:
+    from pno.proton import settings as proton_settings
+
+    current = proton_settings.load()
+    info, warnings = _vpn_catalog_info(no_account=args.no_account)
+    warnings.extend(info.warnings)
+    app = proton_settings.read_app_config()
+    canonical = current.canonical()
+    if not current.exists:
+        warnings.append(
+            "no Proton settings file yet; Proton defaults are shown and will be "
+            "kept sparse"
+        )
+    payload: dict[str, Any] = {
+        "ok": True,
+        "path": str(current.path),
+        "exists": current.exists,
+        "settings": {
+            **canonical,
+            "protocol_label": info.protocol_label(canonical["protocol"]),
+        },
+        "account": info.account.to_dict() if info.account else None,
+        "capabilities": {
+            "tier": info.tier,
+            "paid": info.account.paid if info.account else None,
+            "protun": info.features.protun,
+            "split_tunneling": info.features.split_tunneling,
+            "protocols": [option.to_dict() for option in info.protocols],
+        },
+        "gui_app": app.to_dict(),
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+    if args.json:
+        _print(payload, True)
+        return 0
+
+    settings: dict[str, Any] = payload["settings"]
+    account: dict[str, Any] | None = payload["account"]
+    if account:
+        print(f"Account:  {account['name']} ({account['plan'] or 'unknown plan'})")
+    else:
+        print("Account:  not signed in")
+    print(f"Path:     {payload['path']} ({'file' if current.exists else 'defaults'})")
+    print(
+        f"Protocol: {settings['protocol_label']} ({settings['protocol']}, "
+        f"{info.protocol_family(settings['protocol'])})"
+    )
+    print(f"NetShield: {settings['netshield']}")
+    print(f"Kill switch: {settings['killswitch']}")
+    print(f"Port forwarding: {_on_off(settings['port_forwarding'])}")
+    split: dict[str, Any] = settings["split_tunneling"]
+    print(
+        f"Split tunneling: {_on_off(split['enabled'])} ({split['mode']}, "
+        f"{len(split['app_paths'])} app(s))"
+    )
+    print(f"VPN Accelerator: {_on_off(settings['vpn_accelerator'])}")
+    print(f"Moderate NAT: {_on_off(settings['moderate_nat'])}")
+    print(f"IPv6: {_on_off(settings['ipv6'])}")
+    print(
+        f"Custom DNS: {_on_off(settings['custom_dns']['enabled'])} "
+        f"({', '.join(settings['custom_dns']['ips']) or 'no servers'})"
+    )
+    print(f"Telemetry: {_on_off(settings['telemetry'])}")
+    print(f"Crash reports: {_on_off(settings['anonymous_crash_reports'])}")
+    gui: dict[str, Any] = payload["gui_app"]
+    print("GUI application (read-only):")
+    print(f"  Auto connect: {gui['connect_at_app_startup'] or 'off'}")
+    print(f"  Start minimized: {_on_off(gui['start_app_minimized'])}")
+    print(f"  Pinned tray connections: {len(gui['tray_pinned_servers'])}")
+    for warning in payload["warnings"]:
+        print(f"warning: {warning}")
+    return 0
+
+
+def _cmd_vpn_set(args: argparse.Namespace, config: Config) -> int:
+    from pno.proton import settings as proton_settings
+
+    key = args.vpn_key
+    value = args.value
+    info, warnings = _vpn_catalog_info()
+    warnings.extend(info.warnings)
+    connected, state_warning = _vpn_connection_state()
+    if state_warning:
+        warnings.append(state_warning)
+    gui_running = _vpn_gui_running()
+
+    if key == "kill-switch":
+        result = proton_settings.apply_killswitch(
+            value,
+            connected=connected,
+            gui_running=gui_running,
+            dry_run=args.dry_run,
+        )
+    else:
+        changes: dict[str, Any] = {}
+        if key == "split-tunneling":
+            changes["split_tunneling_enabled"] = value
+            if args.mode:
+                changes["split_tunneling_mode"] = args.mode
+            if args.app is not None:
+                changes["split_tunneling_apps"] = list(args.app)
+        elif key == "custom-dns":
+            changes["custom_dns_enabled"] = value
+            if args.dns is not None:
+                changes["custom_dns_ips"] = args.dns
+        else:
+            changes[_VPN_FIELDS[key]] = value
+        if (args.mode or args.app is not None) and key != "split-tunneling":
+            raise PnoError("--mode/--app are only valid with split-tunneling")
+        if args.dns is not None and key != "custom-dns":
+            raise PnoError("--dns is only valid with custom-dns")
+        if key == "protocol":
+            protocol = proton_settings.parse_protocol(value, info.catalog)
+            family = info.protocol_family(protocol)
+            if info.protocols and family == "protun" and not info.features.protun:
+                raise PnoError(
+                    "Proton protocols are not enabled for this account",
+                    hint="Use a standard WireGuard or OpenVPN protocol.",
+                )
+        result = proton_settings.apply_changes(
+            changes,
+            connected=connected,
+            gui_running=gui_running,
+            tier=info.tier,
+            catalog=info.catalog,
+            dry_run=args.dry_run,
+        )
+
+    payload = {
+        **result.to_dict(),
+        "dry_run": args.dry_run,
+        "account": info.account.to_dict() if info.account else None,
+        "warnings": list(dict.fromkeys([*warnings, *result.warnings])),
+    }
+    events.emit(
+        "info",
+        "settings",
+        "settings.proton.apply",
+        {
+            "keys": list(result.applied),
+            "changed": result.changed,
+            "dry_run": args.dry_run,
+            "gui_running": gui_running,
+        },
+    )
+    if args.json:
+        _print(payload, True)
+        return 0
+    if args.dry_run:
+        print("Dry run: no file was written")
+    if result.changed and not args.dry_run:
+        print(f"Saved: {result.path}")
+    elif not result.changed:
+        print("Nothing changed")
+    for warning in payload["warnings"]:
+        print(f"warning: {warning}")
     return 0
 
 

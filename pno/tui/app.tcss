@@ -353,3 +353,133 @@ RequirementsScreen {
     margin-top: 2;
     width: 20;
 }
+
+#proton-layout {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#proton-banner {
+    height: auto;
+    min-height: 1;
+    color: $warning;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+.proton-section {
+    height: auto;
+    margin-top: 1;
+    text-style: bold;
+    color: $accent;
+}
+
+.proton-label {
+    height: auto;
+    margin-top: 1;
+    color: $text-muted;
+}
+
+.proton-help {
+    height: auto;
+    color: $text-muted;
+}
+
+#proton-layout Select,
+#proton-layout Input {
+    width: 48;
+}
+
+#proton-account-row {
+    height: auto;
+    align: left middle;
+}
+
+#proton-account {
+    width: 1fr;
+    padding: 0 1;
+}
+
+#proton-account-help {
+    padding: 0 1;
+}
+
+#proton-split-apps {
+    height: 6;
+    width: 60;
+    border: round $accent;
+}
+
+#proton-split-actions {
+    height: auto;
+    padding: 1 0;
+}
+
+#proton-actions {
+    height: auto;
+    padding: 1 0;
+    align: left middle;
+}
+
+#proton-actions Button {
+    margin-right: 2;
+}
+
+#proton-status {
+    width: 1fr;
+    padding: 1 0;
+    color: $text-muted;
+}
+
+#proton-gui-app {
+    padding: 0 1;
+}
+
+#proton-gui-help {
+    padding: 0 1;
+}
+
+RunningAppScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#running-app-dialog {
+    width: 90;
+    height: auto;
+    max-height: 30;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
+
+#running-app-title {
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#running-app-search {
+    margin-bottom: 1;
+}
+
+#running-app-list {
+    height: 15;
+    border: round $accent;
+}
+
+#running-app-empty {
+    height: auto;
+    min-height: 1;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#running-app-actions {
+    height: auto;
+    align: right middle;
+    padding-top: 1;
+}
+
+#running-app-actions Button {
+    margin-left: 2;
+}

@@ -45,6 +45,10 @@ class ConfigError(PnoError):
     code = "config_error"
 
 
+class SettingsError(PnoError):
+    code = "settings_error"
+
+
 class DataUnavailableError(PnoError):
     code = "data_unavailable"
 

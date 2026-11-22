@@ -29,7 +29,8 @@ DEFAULT_PROTON_CACHE = Path.home() / ".cache" / "Proton" / "VPN" / "serverlist.j
 DEFAULT_MAX_AGE = 120.0
 
 
-def _system_python() -> str:
+def system_python() -> str:
+    """Interpreter that has the Proton libraries installed system-wide."""
     override = os.environ.get("PNO_SYSTEM_PYTHON")
     if override:
         return override
@@ -131,7 +132,7 @@ class ServerCache:
     def _run_helper(self) -> dict[str, Any]:
         if self._helper_runner is not None:
             return self._helper_runner()
-        python = _system_python()
+        python = system_python()
         result = run(
             [python, str(self.helper_path)],
             timeout=self.helper_timeout,

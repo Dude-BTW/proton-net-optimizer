@@ -11,7 +11,7 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     Checkbox,
@@ -35,15 +35,18 @@ from pno import favorites as favorites_module
 from pno import inventory as inventory_module
 from pno import log_query, paths
 from pno.config import Config
-from pno.errors import PnoError
+from pno.errors import PnoError, SettingsError
 from pno.ipc import request
 from pno.mirrors.service import mirrors_overview
+from pno.proton import settings as proton_settings
+from pno.proton.account import ProtonInfo, try_fetch_info
 from pno.proton.connection import (
     GuiActiveError,
     connect_server,
     disconnect_server,
     wait_for_disconnected,
 )
+from pno.proton.gui import find_gui_processes
 from pno.proton.models import CountryServers, Server, ServerSnapshot
 from pno.proton.selection import (
     current_server_info,
@@ -58,7 +61,7 @@ from pno.tui import theme
 from pno.tui.filtering import filter_countries, filter_routes
 from pno.tui.flags import country_label, flag, server_label
 from pno.tui.i18n import get_language, set_language, tr
-from pno.tui.modals import GuiConflictScreen, RequirementsScreen
+from pno.tui.modals import GuiConflictScreen, RequirementsScreen, RunningAppScreen
 from pno.tui.state import TAB_IDS, TuiState, TuiStateStore
 
 
@@ -108,6 +111,15 @@ class PnoApp(App[None]):
         self._restore_tab = saved_state.tab
         self._state_dirty = False
         self._save_scheduled = False
+
+        self.proton_settings: proton_settings.ProtonSettings | None = None
+        self.proton_info = ProtonInfo()
+        self.proton_info_error: str | None = None
+        self._proton_snapshot: dict[str, Any] = {}
+        self._proton_dirty = False
+        self._proton_syncing = False
+        self._proton_gui_running = False
+        self._proton_gui_app = proton_settings.GuiAppSettings()
 
         self.remote_status: dict[str, Any] | None = None
         self.mirror_result: dict[str, Any] | None = None
@@ -251,6 +263,211 @@ class PnoApp(App[None]):
                         yield Button(tr("logs.prune"), id="log-prune-btn")
                     yield Static("", id="log-stats")
                     yield RichLog(id="log-view", wrap=True, highlight=False)
+            with TabPane(tr("tab.proton"), id="tab-proton"):
+                with VerticalScroll(id="proton-layout"):
+                    yield Static("", id="proton-banner")
+                    yield Static(
+                        tr("proton.account"),
+                        classes="proton-section",
+                        id="proton-account-title",
+                    )
+                    with Horizontal(id="proton-account-row"):
+                        yield Static("", id="proton-account")
+                        yield Button(
+                            tr("proton.account.manage"), id="proton-manage-btn"
+                        )
+                    yield Static("", id="proton-account-help", classes="proton-help")
+
+                    yield Static(
+                        tr("proton.features"),
+                        classes="proton-section",
+                        id="proton-features-title",
+                    )
+                    yield Label(
+                        tr("proton.netshield"),
+                        classes="proton-label",
+                        id="proton-netshield-label",
+                    )
+                    yield Select(
+                        [
+                            (tr("proton.netshield.off"), "off"),
+                            (tr("proton.netshield.malware-only"), "malware-only"),
+                            (
+                                tr("proton.netshield.malware-ads-trackers"),
+                                "malware-ads-trackers",
+                            ),
+                        ],
+                        value="off",
+                        id="proton-netshield",
+                        allow_blank=False,
+                    )
+                    yield Static(
+                        tr("proton.netshield.help"),
+                        id="proton-netshield-help",
+                        classes="proton-help",
+                    )
+                    yield Label(
+                        tr("proton.killswitch"),
+                        classes="proton-label",
+                        id="proton-killswitch-label",
+                    )
+                    yield Select(
+                        [
+                            (tr("proton.killswitch.off"), "off"),
+                            (tr("proton.killswitch.standard"), "standard"),
+                            (tr("proton.killswitch.advanced"), "advanced"),
+                        ],
+                        value="off",
+                        id="proton-killswitch",
+                        allow_blank=False,
+                    )
+                    yield Static(
+                        tr("proton.killswitch.help"),
+                        id="proton-killswitch-help",
+                        classes="proton-help",
+                    )
+                    yield Static(
+                        tr("proton.killswitch.advanced_note"),
+                        id="proton-killswitch-note",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(
+                        tr("proton.port_forwarding"),
+                        id="proton-port-forwarding",
+                    )
+                    yield Static(
+                        tr("proton.port_forwarding.help"),
+                        id="proton-port-forwarding-help",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(tr("proton.split"), id="proton-split")
+                    yield Static(
+                        tr("proton.split.help"),
+                        id="proton-split-help",
+                        classes="proton-help",
+                    )
+                    yield Label(
+                        tr("proton.split.mode"),
+                        classes="proton-label",
+                        id="proton-split-mode-label",
+                    )
+                    yield Select(
+                        [
+                            (tr("proton.split.exclude"), "exclude"),
+                            (tr("proton.split.include"), "include"),
+                        ],
+                        value="exclude",
+                        id="proton-split-mode",
+                        allow_blank=False,
+                    )
+                    yield Label(
+                        tr("proton.split.apps"),
+                        classes="proton-label",
+                        id="proton-split-apps-label",
+                    )
+                    yield TextArea(
+                        placeholder=tr("proton.split.apps_placeholder"),
+                        id="proton-split-apps",
+                    )
+                    with Horizontal(id="proton-split-actions"):
+                        yield Button(
+                            tr("proton.split.add_running"),
+                            id="proton-add-app-btn",
+                        )
+
+                    yield Static(
+                        tr("proton.connection"),
+                        classes="proton-section",
+                        id="proton-connection-title",
+                    )
+                    yield Checkbox(tr("proton.protun"), id="proton-protun")
+                    yield Static(
+                        tr("proton.protun.help"),
+                        id="proton-protun-help",
+                        classes="proton-help",
+                    )
+                    yield Label(
+                        tr("proton.protocol"),
+                        classes="proton-label",
+                        id="proton-protocol-label",
+                    )
+                    yield Select(
+                        [
+                            (option.label, option.id)
+                            for option in proton_settings.FALLBACK_PROTOCOLS
+                            if option.family == "generic"
+                        ],
+                        value="wireguard",
+                        id="proton-protocol",
+                        allow_blank=False,
+                    )
+                    yield Static(
+                        tr("proton.protocol.help"),
+                        id="proton-protocol-help",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(tr("proton.accelerator"), id="proton-accelerator")
+                    yield Static(
+                        tr("proton.accelerator.help"),
+                        id="proton-accelerator-help",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(tr("proton.moderate_nat"), id="proton-moderate-nat")
+                    yield Static(
+                        tr("proton.moderate_nat.help"),
+                        id="proton-moderate-nat-help",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(tr("proton.ipv6"), id="proton-ipv6")
+                    yield Static(
+                        tr("proton.ipv6.help"),
+                        id="proton-ipv6-help",
+                        classes="proton-help",
+                    )
+                    yield Checkbox(tr("proton.custom_dns"), id="proton-custom-dns")
+                    yield Static(
+                        tr("proton.custom_dns.help"),
+                        id="proton-custom-dns-help",
+                        classes="proton-help",
+                    )
+                    yield Label(
+                        tr("proton.custom_dns.ips"),
+                        classes="proton-label",
+                        id="proton-dns-label",
+                    )
+                    yield Input(
+                        placeholder=tr("proton.dns_placeholder"), id="proton-dns"
+                    )
+
+                    yield Static(
+                        tr("proton.general"),
+                        classes="proton-section",
+                        id="proton-general-title",
+                    )
+                    yield Checkbox(tr("proton.telemetry"), id="proton-telemetry")
+                    yield Checkbox(
+                        tr("proton.crash_reports"), id="proton-crash-reports"
+                    )
+
+                    yield Static(
+                        tr("proton.gui_app"),
+                        classes="proton-section",
+                        id="proton-gui-title",
+                    )
+                    yield Static("", id="proton-gui-app", classes="proton-help")
+                    yield Static(
+                        tr("proton.gui_app.hint"),
+                        id="proton-gui-help",
+                        classes="proton-help",
+                    )
+                    with Horizontal(id="proton-actions"):
+                        yield Button(
+                            tr("proton.apply"),
+                            id="proton-apply-btn",
+                            variant="primary",
+                        )
+                        yield Button(tr("proton.revert"), id="proton-revert-btn")
+                        yield Static("", id="proton-status")
             with TabPane(tr("tab.settings"), id="tab-settings"):
                 with Vertical(id="settings-layout"):
                     yield Label(tr("settings.top_n"), id="label-top-n")
@@ -289,6 +506,8 @@ class PnoApp(App[None]):
         self._refresh_logs()
         self._refresh_log_stats()
         self._reload_favorites()
+        self._load_proton_settings()
+        self._proton_info_worker()
         tabs = self.query_one("#tabs", TabbedContent)
         if self._restore_tab in TAB_IDS:
             tabs.active = self._restore_tab
@@ -673,6 +892,494 @@ class PnoApp(App[None]):
         self._update_favorites_controls()
         self.notify(tr("favorites.reverted"), severity="information")
 
+    # ------------------------------------------------------- proton settings
+    def _proton_connected(self) -> bool:
+        vpn = (
+            (self.remote_status or {}).get("vpn")
+            or self.state_store.read().get("vpn")
+            or {}
+        )
+        return bool(vpn.get("connected"))
+
+    def _protun_available(self) -> bool:
+        if self.proton_info.protocols:
+            return self.proton_info.features.protun
+        return True
+
+    def _load_proton_settings(self) -> None:
+        try:
+            current = proton_settings.load()
+            app = proton_settings.read_app_config()
+        except SettingsError as exc:
+            self.proton_settings = None
+            self._proton_snapshot = {}
+            self._proton_dirty = False
+            self.query_one("#proton-banner", Static).update(
+                tr("proton.load_failed", error=exc.message)
+            )
+            self.query_one("#proton-status", Static).update(tr("proton.unavailable"))
+            self.query_one("#proton-apply-btn", Button).disabled = True
+            return
+        self.proton_settings = current
+        self._proton_gui_app = app
+        self._proton_snapshot = current.canonical()
+        # The Select widgets can only show known values; an unknown value from
+        # a newer Proton version stays untouched in the file.
+        if self._proton_snapshot["killswitch"] not in proton_settings.KILLSWITCH_VALUES:
+            self._proton_snapshot["killswitch"] = "off"
+        if self._proton_snapshot["netshield"] not in proton_settings.NETSHIELD_VALUES:
+            self._proton_snapshot["netshield"] = "off"
+        self._proton_gui_running = bool(find_gui_processes())
+        self._proton_syncing = True
+        try:
+            self._set_proton_widgets(self._proton_snapshot)
+            self._populate_protocol_options(
+                current=self._proton_snapshot["protocol"], keep=True
+            )
+        finally:
+            self._proton_syncing = False
+        self._proton_dirty = False
+        self._render_proton_account()
+        self._render_proton_gui_app()
+        self.query_one("#proton-status", Static).update("")
+        self._refresh_proton_controls()
+
+    def _set_proton_widgets(self, snapshot: dict[str, Any]) -> None:
+        netshield = snapshot["netshield"]
+        self.query_one("#proton-netshield", Select).value = (
+            netshield if netshield in proton_settings.NETSHIELD_VALUES else "off"
+        )
+        killswitch = snapshot["killswitch"]
+        self.query_one("#proton-killswitch", Select).value = (
+            killswitch if killswitch in proton_settings.KILLSWITCH_VALUES else "off"
+        )
+        self.query_one("#proton-port-forwarding", Checkbox).value = bool(
+            snapshot["port_forwarding"]
+        )
+        split = snapshot["split_tunneling"]
+        self.query_one("#proton-split", Checkbox).value = bool(split["enabled"])
+        self.query_one("#proton-split-mode", Select).value = split["mode"]
+        self.query_one("#proton-split-apps", TextArea).text = "\n".join(
+            split["app_paths"]
+        )
+        self.query_one("#proton-accelerator", Checkbox).value = bool(
+            snapshot["vpn_accelerator"]
+        )
+        self.query_one("#proton-moderate-nat", Checkbox).value = bool(
+            snapshot["moderate_nat"]
+        )
+        self.query_one("#proton-ipv6", Checkbox).value = bool(snapshot["ipv6"])
+        self.query_one("#proton-custom-dns", Checkbox).value = bool(
+            snapshot["custom_dns"]["enabled"]
+        )
+        self.query_one("#proton-dns", Input).value = ", ".join(
+            snapshot["custom_dns"]["ips"]
+        )
+        self.query_one("#proton-telemetry", Checkbox).value = bool(
+            snapshot["telemetry"]
+        )
+        self.query_one("#proton-crash-reports", Checkbox).value = bool(
+            snapshot["anonymous_crash_reports"]
+        )
+
+    def _populate_protocol_options(
+        self, *, current: str, keep: bool, family: str | None = None
+    ) -> None:
+        catalog = self.proton_info.catalog
+        protun = self._protun_available()
+        if family is None:
+            family = self.proton_info.protocol_family(current)
+        if family == "protun" and not protun:
+            family = "generic"
+        self.query_one("#proton-protun", Checkbox).value = family == "protun"
+        options = [option for option in catalog if option.family == family]
+        if not options:
+            options = list(catalog)
+        select = self.query_one("#proton-protocol", Select)
+        select.set_options([(option.label, option.id) for option in options])
+        ids = [option.id for option in options]
+        if current in ids:
+            select.value = current
+        elif keep:
+            label = self.proton_info.protocol_label(current)
+            select.set_options(
+                [(f"{label} (unavailable)", current)]
+                + [(option.label, option.id) for option in options]
+            )
+            select.value = current
+        elif options:
+            select.value = options[0].id
+
+    def _render_proton_account(self) -> None:
+        account = self.proton_info.account
+        if account is None:
+            text = tr("proton.account.none")
+        else:
+            text = tr(
+                "proton.account.line",
+                name=account.name or tr("common.unknown"),
+                plan=account.plan or tr("proton.account.plan_unknown"),
+            )
+        self.query_one("#proton-account", Static).update(text)
+        help_text = ""
+        if self.proton_info_error:
+            help_text = tr("proton.account.failed", error=self.proton_info_error)
+        elif self.proton_info.warnings:
+            help_text = tr("proton.warning", warning=self.proton_info.warnings[0])
+        self.query_one("#proton-account-help", Static).update(help_text)
+
+    def _render_proton_gui_app(self) -> None:
+        app = self._proton_gui_app
+        auto = app.auto_connect or tr("proton.gui_app.off")
+        lines = [
+            tr("proton.gui_app.auto", value=auto),
+            tr(
+                "proton.gui_app.start",
+                value=tr("common.on") if app.start_minimized else tr("common.off"),
+            ),
+            tr("proton.gui_app.pinned", count=len(app.pinned)),
+        ]
+        self.query_one("#proton-gui-app", Static).update("\n".join(lines))
+
+    def _proton_edit_targets(self) -> list[str]:
+        return [
+            "#proton-netshield",
+            "#proton-killswitch",
+            "#proton-port-forwarding",
+            "#proton-split",
+            "#proton-split-mode",
+            "#proton-split-apps",
+            "#proton-add-app-btn",
+            "#proton-protun",
+            "#proton-protocol",
+            "#proton-accelerator",
+            "#proton-moderate-nat",
+            "#proton-ipv6",
+            "#proton-custom-dns",
+            "#proton-dns",
+            "#proton-telemetry",
+            "#proton-crash-reports",
+        ]
+
+    def _refresh_proton_controls(self) -> None:
+        try:
+            blocked = self._proton_gui_running
+            connected = self._proton_connected()
+            disconnected_only = {
+                "#proton-killswitch",
+                "#proton-split",
+                "#proton-split-mode",
+                "#proton-split-apps",
+                "#proton-add-app-btn",
+                "#proton-protun",
+                "#proton-protocol",
+            }
+            for widget_id in self._proton_edit_targets():
+                widget = self.query_one(widget_id)
+                widget.disabled = blocked or (
+                    connected and widget_id in disconnected_only
+                )
+            self.query_one("#proton-apply-btn", Button).disabled = (
+                blocked or not self._proton_dirty or self.proton_settings is None
+            )
+            self.query_one("#proton-revert-btn", Button).disabled = (
+                blocked or not self._proton_dirty
+            )
+            banner = self.query_one("#proton-banner", Static)
+            if blocked:
+                banner.update(tr("proton.gui_running"))
+            elif connected:
+                banner.update(tr("proton.connected"))
+            else:
+                banner.update("")
+            status = self.query_one("#proton-status", Static)
+            if blocked:
+                status.update(tr("proton.gui_running"))
+            elif self._proton_dirty:
+                status.update(tr("proton.unsaved"))
+        except Exception:  # noqa: BLE001 - the widget tree may be gone on exit
+            return
+
+    def _mark_proton_dirty(self) -> None:
+        if self._proton_syncing:
+            return
+        if not self._proton_snapshot:
+            self._proton_dirty = False
+        else:
+            try:
+                self._proton_dirty = bool(self._collect_proton_changes())
+            except SettingsError:
+                self._proton_dirty = True
+        self._refresh_proton_controls()
+
+    def _collect_proton_changes(self) -> dict[str, Any]:
+        snapshot = self._proton_snapshot
+        changes: dict[str, Any] = {}
+
+        def select_value(widget_id: str) -> str:
+            return str(self.query_one(widget_id, Select).value)
+
+        def check_value(widget_id: str) -> bool:
+            return bool(self.query_one(widget_id, Checkbox).value)
+
+        netshield = select_value("#proton-netshield")
+        if netshield != snapshot["netshield"]:
+            changes["netshield"] = netshield
+        killswitch = select_value("#proton-killswitch")
+        if killswitch != snapshot["killswitch"]:
+            changes["killswitch"] = killswitch
+        if check_value("#proton-port-forwarding") != snapshot["port_forwarding"]:
+            changes["port_forwarding"] = check_value("#proton-port-forwarding")
+        if check_value("#proton-split") != snapshot["split_tunneling"]["enabled"]:
+            changes["split_tunneling_enabled"] = check_value("#proton-split")
+        if select_value("#proton-split-mode") != snapshot["split_tunneling"]["mode"]:
+            changes["split_tunneling_mode"] = select_value("#proton-split-mode")
+        apps = proton_settings.parse_app_paths(
+            self.query_one("#proton-split-apps", TextArea).text
+        )
+        if list(apps) != snapshot["split_tunneling"]["app_paths"]:
+            changes["split_tunneling_apps"] = list(apps)
+        protocol = select_value("#proton-protocol")
+        if protocol != snapshot["protocol"]:
+            changes["protocol"] = protocol
+        if check_value("#proton-accelerator") != snapshot["vpn_accelerator"]:
+            changes["vpn_accelerator"] = check_value("#proton-accelerator")
+        if check_value("#proton-moderate-nat") != snapshot["moderate_nat"]:
+            changes["moderate_nat"] = check_value("#proton-moderate-nat")
+        if check_value("#proton-ipv6") != snapshot["ipv6"]:
+            changes["ipv6"] = check_value("#proton-ipv6")
+        if check_value("#proton-custom-dns") != snapshot["custom_dns"]["enabled"]:
+            changes["custom_dns_enabled"] = check_value("#proton-custom-dns")
+        dns = proton_settings.parse_dns_servers(
+            self.query_one("#proton-dns", Input).value
+        )
+        if list(dns) != snapshot["custom_dns"]["ips"]:
+            changes["custom_dns_ips"] = list(dns)
+        if check_value("#proton-telemetry") != snapshot["telemetry"]:
+            changes["telemetry"] = check_value("#proton-telemetry")
+        if check_value("#proton-crash-reports") != snapshot["anonymous_crash_reports"]:
+            changes["anonymous_crash_reports"] = check_value("#proton-crash-reports")
+        return changes
+
+    def _apply_proton(self) -> None:
+        if self.proton_settings is None:
+            self.notify(tr("proton.unavailable"), severity="error")
+            return
+        if not self._proton_dirty:
+            self.notify(tr("proton.no_changes"), severity="information")
+            return
+        try:
+            changes = self._collect_proton_changes()
+        except SettingsError as exc:
+            self.notify(
+                tr("proton.invalid", error=exc.message), severity="error", timeout=8
+            )
+            return
+        if not changes:
+            self._proton_dirty = False
+            self.query_one("#proton-status", Static).update("")
+            self._refresh_proton_controls()
+            self.notify(tr("proton.no_changes"), severity="information")
+            return
+        gui_running = bool(find_gui_processes())
+        self._proton_gui_running = gui_running
+        if gui_running:
+            self.notify(tr("proton.gui_running"), severity="warning", timeout=8)
+            self._refresh_proton_controls()
+            return
+        connected = self._proton_connected()
+        killswitch = changes.pop("killswitch", None)
+        warnings: list[str] = []
+        applied = False
+        try:
+            if changes:
+                result = proton_settings.apply_changes(
+                    changes,
+                    connected=connected,
+                    gui_running=gui_running,
+                    tier=self.proton_info.tier,
+                    catalog=self.proton_info.catalog,
+                )
+                applied = result.changed
+                warnings.extend(result.warnings)
+            if killswitch is not None:
+                kill = proton_settings.apply_killswitch(
+                    killswitch,
+                    connected=connected,
+                    gui_running=gui_running,
+                )
+                warnings.extend(kill.warnings)
+        except SettingsError as exc:
+            if applied:
+                self.notify(
+                    tr("proton.partial", error=exc.message),
+                    severity="warning",
+                    timeout=10,
+                )
+            else:
+                self.notify(
+                    tr("proton.invalid", error=exc.message),
+                    severity="error",
+                    timeout=8,
+                )
+            self._load_proton_settings()
+            return
+        events.emit(
+            "info",
+            "settings",
+            "settings.proton.apply",
+            {
+                "keys": sorted([*changes, *(["killswitch"] if killswitch else [])]),
+                "changed": True,
+                "gui_running": False,
+            },
+        )
+        self._load_proton_settings()
+        self.notify(tr("proton.saved"), severity="information", timeout=6)
+        for warning in dict.fromkeys(warnings):
+            self.notify(
+                tr("proton.warning", warning=warning),
+                severity="warning",
+                timeout=8,
+            )
+
+    def _revert_proton(self) -> None:
+        self._load_proton_settings()
+        self.notify(tr("proton.reverted"), severity="information")
+
+    @on(Checkbox.Changed)
+    def _on_proton_checkbox(self, event: Checkbox.Changed) -> None:
+        if self._proton_syncing:
+            return
+        widget_id = event.checkbox.id or ""
+        if not widget_id.startswith("proton-"):
+            return
+        if widget_id == "proton-protun":
+            return
+        self._mark_proton_dirty()
+
+    @on(Checkbox.Changed, "#proton-protun")
+    def _on_proton_protun(self, event: Checkbox.Changed) -> None:
+        if self._proton_syncing:
+            return
+        current = str(self.query_one("#proton-protocol", Select).value)
+        family = "protun" if event.value else "generic"
+        self._proton_syncing = True
+        try:
+            self._populate_protocol_options(current=current, keep=False, family=family)
+        finally:
+            self._proton_syncing = False
+        self._mark_proton_dirty()
+
+    @on(Select.Changed)
+    def _on_proton_select(self, event: Select.Changed) -> None:
+        if self._proton_syncing:
+            return
+        widget_id = event.select.id or ""
+        if widget_id.startswith("proton-"):
+            self._mark_proton_dirty()
+
+    @on(Select.Changed, "#proton-split-mode")
+    def _on_proton_split_mode(self, event: Select.Changed) -> None:
+        if self._proton_syncing or self.proton_settings is None:
+            return
+        mode = str(event.value)
+        if mode not in {"exclude", "include"}:
+            return
+        apps = self.proton_settings.split_tunneling_apps_for(mode)
+        self._proton_syncing = True
+        try:
+            self.query_one("#proton-split-apps", TextArea).text = "\n".join(apps)
+        finally:
+            self._proton_syncing = False
+        self._mark_proton_dirty()
+
+    @on(Input.Changed, "#proton-dns")
+    def _on_proton_dns(self, event: Input.Changed) -> None:
+        if not self._proton_syncing:
+            self._mark_proton_dirty()
+
+    @on(TextArea.Changed, "#proton-split-apps")
+    def _on_proton_split_apps(self, event: TextArea.Changed) -> None:
+        if not self._proton_syncing:
+            self._mark_proton_dirty()
+
+    @on(Button.Pressed, "#proton-apply-btn")
+    def _on_proton_apply(self) -> None:
+        self._apply_proton()
+
+    @on(Button.Pressed, "#proton-revert-btn")
+    def _on_proton_revert(self) -> None:
+        self._revert_proton()
+
+    @on(Button.Pressed, "#proton-add-app-btn")
+    def _on_proton_add_app(self) -> None:
+        self.push_screen(RunningAppScreen(), self._on_running_app_selected)
+
+    def _on_running_app_selected(self, path: str | None) -> None:
+        if not path:
+            return
+        area = self.query_one("#proton-split-apps", TextArea)
+        lines = [line.strip() for line in area.text.splitlines() if line.strip()]
+        if path not in lines:
+            lines.append(path)
+        self._proton_syncing = True
+        try:
+            area.text = "\n".join(lines)
+        finally:
+            self._proton_syncing = False
+        self._mark_proton_dirty()
+
+    @on(Button.Pressed, "#proton-manage-btn")
+    def _on_proton_manage(self) -> None:
+        self._open_account_worker()
+
+    @work(thread=True, exclusive=True, group="proton-manage")
+    def _open_account_worker(self) -> None:
+        import webbrowser
+
+        try:
+            opened = webbrowser.open("https://account.protonvpn.com/account")
+        except Exception as exc:  # noqa: BLE001 - the browser is an external tool
+            opened = False
+            detail = str(exc)
+        else:
+            detail = "browser refused to open"
+        if not opened:
+            self.call_from_thread(
+                self.notify,
+                tr("proton.account.open_failed", error=detail),
+                severity="warning",
+                timeout=8,
+            )
+
+    @work(thread=True, exclusive=True, group="proton")
+    def _proton_info_worker(self) -> None:
+        info, error = try_fetch_info()
+        self.call_from_thread(self._apply_proton_info, info, error)
+
+    def _apply_proton_info(self, info: ProtonInfo, error: str | None) -> None:
+        self.proton_info = info
+        self.proton_info_error = error
+        self._render_proton_account()
+        if self.proton_settings is not None:
+            self._proton_syncing = True
+            try:
+                current = str(self.query_one("#proton-protocol", Select).value)
+                self._populate_protocol_options(current=current, keep=True)
+            finally:
+                self._proton_syncing = False
+        self._refresh_proton_controls()
+
+    def _activate_proton_tab(self) -> None:
+        self._proton_gui_running = bool(find_gui_processes())
+        if not self._proton_dirty:
+            self._load_proton_settings()
+        else:
+            self._refresh_proton_controls()
+        if not self.proton_info.protocols or self.proton_info.account is None:
+            self._proton_info_worker()
+
     def _load_mirror_overview(self) -> None:
         try:
             overview = mirrors_overview(self.config, self.state_store)
@@ -838,6 +1545,7 @@ class PnoApp(App[None]):
         self.query_one("#disconnect-btn", Button).disabled = not connected
         self.query_one("#disconnect-btn", Button).label = tr("button.disconnect")
         self._render_current_info()
+        self._refresh_proton_controls()
         if previous_server != self.current_server and self.selected_country_code:
             self._populate_servers(self.selected_country_code)
 
@@ -993,6 +1701,9 @@ class PnoApp(App[None]):
             self._refresh_log_stats()
         if tabs.active == "tab-mirrors" and self.mirror_result is None:
             self._load_mirror_overview()
+        if tabs.active == "tab-proton":
+            self._proton_gui_running = bool(find_gui_processes())
+            self._refresh_proton_controls()
         self._remote_status_worker()
 
     # --------------------------------------------------------------- workers
@@ -1372,6 +2083,8 @@ class PnoApp(App[None]):
         if tabs.active in TAB_IDS:
             self._restore_tab = tabs.active
             self._mark_state_dirty()
+        if tabs.active == "tab-proton":
+            self._activate_proton_tab()
 
     @on(Select.Changed, "#language")
     def _on_language(self, event: Select.Changed) -> None:
@@ -1495,6 +2208,113 @@ class PnoApp(App[None]):
         self._flush_state()
 
     # ------------------------------------------------------------ retranslate
+    def _retranslate_proton(self) -> None:
+        for widget_id, key in (
+            ("proton-account-title", "proton.account"),
+            ("proton-features-title", "proton.features"),
+            ("proton-netshield-label", "proton.netshield"),
+            ("proton-netshield-help", "proton.netshield.help"),
+            ("proton-killswitch-label", "proton.killswitch"),
+            ("proton-killswitch-help", "proton.killswitch.help"),
+            ("proton-killswitch-note", "proton.killswitch.advanced_note"),
+            ("proton-port-forwarding-help", "proton.port_forwarding.help"),
+            ("proton-split-help", "proton.split.help"),
+            ("proton-split-mode-label", "proton.split.mode"),
+            ("proton-split-apps-label", "proton.split.apps"),
+            ("proton-connection-title", "proton.connection"),
+            ("proton-protun-help", "proton.protun.help"),
+            ("proton-protocol-label", "proton.protocol"),
+            ("proton-protocol-help", "proton.protocol.help"),
+            ("proton-accelerator-help", "proton.accelerator.help"),
+            ("proton-moderate-nat-help", "proton.moderate_nat.help"),
+            ("proton-ipv6-help", "proton.ipv6.help"),
+            ("proton-custom-dns-help", "proton.custom_dns.help"),
+            ("proton-dns-label", "proton.custom_dns.ips"),
+            ("proton-general-title", "proton.general"),
+            ("proton-gui-title", "proton.gui_app"),
+            ("proton-gui-help", "proton.gui_app.hint"),
+        ):
+            try:
+                widget = self.query_one(f"#{widget_id}")
+            except Exception:  # noqa: BLE001 - widget tree may be gone
+                continue
+            if isinstance(widget, (Label, Static)):
+                widget.update(tr(key))
+        for widget_id, key in (
+            ("proton-manage-btn", "proton.account.manage"),
+            ("proton-apply-btn", "proton.apply"),
+            ("proton-revert-btn", "proton.revert"),
+            ("proton-add-app-btn", "proton.split.add_running"),
+        ):
+            try:
+                self.query_one(f"#{widget_id}", Button).label = tr(key)
+            except Exception:  # noqa: BLE001
+                continue
+        for widget_id, key in (
+            ("proton-port-forwarding", "proton.port_forwarding"),
+            ("proton-split", "proton.split"),
+            ("proton-protun", "proton.protun"),
+            ("proton-accelerator", "proton.accelerator"),
+            ("proton-moderate-nat", "proton.moderate_nat"),
+            ("proton-ipv6", "proton.ipv6"),
+            ("proton-custom-dns", "proton.custom_dns"),
+            ("proton-telemetry", "proton.telemetry"),
+            ("proton-crash-reports", "proton.crash_reports"),
+        ):
+            try:
+                self.query_one(f"#{widget_id}", Checkbox).label = tr(key)
+            except Exception:  # noqa: BLE001
+                continue
+        try:
+            self.query_one("#proton-dns", Input).placeholder = tr(
+                "proton.dns_placeholder"
+            )
+            self.query_one("#proton-split-apps", TextArea).placeholder = tr(
+                "proton.split.apps_placeholder"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            netshield = self.query_one("#proton-netshield", Select)
+            netshield_value = str(netshield.value)
+            netshield.set_options(
+                [
+                    (tr("proton.netshield.off"), "off"),
+                    (tr("proton.netshield.malware-only"), "malware-only"),
+                    (
+                        tr("proton.netshield.malware-ads-trackers"),
+                        "malware-ads-trackers",
+                    ),
+                ]
+            )
+            if netshield_value in proton_settings.NETSHIELD_VALUES:
+                netshield.value = netshield_value
+            killswitch = self.query_one("#proton-killswitch", Select)
+            killswitch_value = str(killswitch.value)
+            killswitch.set_options(
+                [
+                    (tr("proton.killswitch.off"), "off"),
+                    (tr("proton.killswitch.standard"), "standard"),
+                    (tr("proton.killswitch.advanced"), "advanced"),
+                ]
+            )
+            if killswitch_value in proton_settings.KILLSWITCH_VALUES:
+                killswitch.value = killswitch_value
+            mode = self.query_one("#proton-split-mode", Select)
+            mode_value = str(mode.value)
+            mode.set_options(
+                [
+                    (tr("proton.split.exclude"), "exclude"),
+                    (tr("proton.split.include"), "include"),
+                ]
+            )
+            if mode_value in {"exclude", "include"}:
+                mode.value = mode_value
+        except Exception:  # noqa: BLE001
+            pass
+        self._render_proton_account()
+        self._render_proton_gui_app()
+
     def _retranslate(self) -> None:
         self.TITLE = tr("app.title")
         tabs = self.query_one("#tabs", TabbedContent)
@@ -1504,6 +2324,7 @@ class PnoApp(App[None]):
             ("tab-favorites", "tab.favorites"),
             ("tab-mirrors", "tab.mirrors"),
             ("tab-logs", "tab.logs"),
+            ("tab-proton", "tab.proton"),
             ("tab-settings", "tab.settings"),
         ):
             try:
@@ -1562,6 +2383,7 @@ class PnoApp(App[None]):
                 for code, key in (("en", "language.en"), ("uk", "language.uk"))
             ]
         )
+        self._retranslate_proton()
         self._populate_countries()
         self._populate_secure_core()
         if self.mirror_result:

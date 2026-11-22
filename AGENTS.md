@@ -30,6 +30,10 @@ it must never switch servers on its own.
   Never hardcode a user's countries, servers or other personal preferences in
   tracked files or in this AGENTS.md.
 - `pno/data/inventory.toml` is an **empty template** shipped with the project.
+- Proton's own settings live in `~/.config/Proton/VPN/settings.json` and
+  `app-config.json`. `pno` edits them only on an explicit user request, never
+  copies them into the repository, and never logs split-tunneling paths or
+  pinned servers.
 - Runtime state, logs and the TUI session file live under XDG directories and
   are ignored by git.
 - Favorites are data only: never encode a preference or order between entries.
@@ -121,13 +125,19 @@ it must never switch servers on its own.
 - Status colours use the Catppuccin Mocha palette in `pno/tui/theme.py`;
   load thresholds are 40/70. Keep the Current band's background and its equal
   top/bottom spacing intact when changing the layout.
+- Proton settings writes are sparse, atomic and idempotent: preserve unknown
+  keys, skip the write when nothing changed, refuse to write while the Proton
+  VPN GUI is running, and require a disconnected VPN for protocol, kill switch
+  and split tunneling. NetShield and custom DNS stay mutually exclusive.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.
 - `pno/requirements.py` — startup component checks shared by TUI/tray/daemon.
 - `pno/favorites.py` — personal favorites parsing/validation/saving; uses only
   `~/.config/proton-net-optimizer/inventory.toml`.
-- `pno/proton/` — helper, cache, status, selection, GUI detection, actions.
+- `pno/proton/` — helpers, cache, status, selection, GUI detection, connection
+  actions, Proton settings (`settings.py`, `account.py`, `settings.json` is
+  owned by Proton) and the account/protocol helper.
 - `pno/mirrors/` — status, probe, planner, apply, root helper.
 - `pno/tui/` — Textual UI, filters, flags, modals and i18n; `pno/tray/` — PySide6 tray.
 - `pno/install.py` — user unit, autostart, KDE menu entry, icon, sudo helper.
