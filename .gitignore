@@ -8,3 +8,15 @@ __pycache__/
 build/
 dist/
 *.env
+
+# Local/user runtime data (normally stored under XDG directories)
+/inventory.toml
+/config.toml
+/state.json
+/servers.json
+/tui.json
+/logs/
+/archive/
+*.jsonl
+.pno/
+.sync/

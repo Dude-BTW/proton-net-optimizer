@@ -72,8 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     servers.add_argument(
         "--inventory",
+        "--favorites",
+        dest="inventory",
         action="store_true",
-        help="limit to countries/routes listed in the inventory",
+        help="limit to countries/routes listed in favorites",
     )
     servers.add_argument(
         "--refresh", action="store_true", help="force a fresh Proton fetch"
@@ -131,6 +133,26 @@ def build_parser() -> argparse.ArgumentParser:
         item = daemon_sub.add_parser(name, help=help_text)
         _add_json_flag(item)
 
+    favorites = sub.add_parser("favorites", help="manage personal favorites")
+    _add_json_flag(favorites)
+    favorite_sub = favorites.add_subparsers(dest="favorites_command", required=True)
+    for name, help_text in (
+        ("list", "show saved favorites"),
+        ("add", "add countries or Secure Core routes"),
+        ("remove", "remove countries or Secure Core routes"),
+        ("set", "replace favorites with the given entries"),
+        ("clear", "remove all favorites"),
+    ):
+        item = favorite_sub.add_parser(name, help=help_text)
+        _add_json_flag(item)
+    for name in ("add", "remove", "set"):
+        item = favorite_sub.choices[name]
+        item.add_argument("entries", nargs="*", help="country codes/names or SC routes")
+        item.add_argument("--file", help="read entries from a file ('-' for stdin)")
+        item.add_argument(
+            "--stdin", action="store_true", help="read entries from stdin"
+        )
+
     tui = sub.add_parser("tui", help="open the Textual interface")
     _add_json_flag(tui)
 
@@ -154,6 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("--grep")
     logs.add_argument("--limit", type=int, default=200)
     logs.add_argument("--summary", action="store_true")
+    logs.add_argument(
+        "--prune", action="store_true", help="delete old archive logs by limits"
+    )
+    logs.add_argument("--keep-files", type=int, help="keep the newest N archive files")
+    logs.add_argument(
+        "--max-age-days", type=int, help="delete archives older than N days"
+    )
 
     install = sub.add_parser("install", help="install the daemon, tray and sudo helper")
     _add_json_flag(install)
@@ -240,9 +269,8 @@ def _load_config(args: argparse.Namespace) -> Config:
 
 
 def _configure_logging(config: Config, args: argparse.Namespace) -> None:
-    events.configure(
-        paths.logs_dir(),
-        level=config.log_level,
+    events.configure_from_config(
+        config,
         console=bool(getattr(args, "verbose", False)),
     )
 
@@ -271,6 +299,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_servers(args, config)
     if command == "connect":
         return _cmd_connect(args, config)
+    if command == "favorites":
+        return _cmd_favorites(args, config)
     if command == "disconnect":
         return _cmd_disconnect(args, config)
     if command == "mirrors":
@@ -494,6 +524,120 @@ def _cmd_servers(args: argparse.Namespace, config: Config) -> int:
                 f"   {server.name:<14} {server.load:3}%  score {server.score:5.2f}  "
                 f"{server.city or '-':<18}{tags}"
             )
+    return 0
+
+
+# ------------------------------------------------------------------ favorites
+def _favorites_snapshot(config: Config):
+    return ServerCache(helper_timeout=config.proton_helper_timeout).get(
+        max_age=config.servers_max_age
+    )
+
+
+def _favorites_errors(result) -> None:
+    if not result.errors:
+        return
+    detail = "\n".join(f"line {error.line}: {error.message}" for error in result.errors)
+    raise PnoError("invalid favorites", detail=detail)
+
+
+def _favorites_input(args: argparse.Namespace) -> str:
+    chunks: list[str] = []
+    if args.entries:
+        chunks.append("\n".join(args.entries))
+    if args.file:
+        if args.file == "-":
+            chunks.append(sys.stdin.read())
+        else:
+            try:
+                chunks.append(Path(args.file).read_text(encoding="utf-8"))
+            except OSError as exc:
+                raise PnoError(f"cannot read {args.file}", detail=str(exc)) from exc
+    if args.stdin:
+        chunks.append(sys.stdin.read())
+    text = "\n".join(chunks).strip()
+    if not text:
+        raise PnoError("no favorite entries given")
+    return text
+
+
+def _favorites_payload(favorites) -> dict:
+    return {
+        "countries": list(favorites.countries),
+        "secure_core_servers": list(favorites.secure_core_servers),
+        "path": str(paths.user_inventory_file()),
+    }
+
+
+def _cmd_favorites(args: argparse.Namespace, config: Config) -> int:
+    from pno import favorites as favorites_module
+
+    sub = args.favorites_command
+    if sub == "list":
+        current = favorites_module.load()
+        payload = {"ok": True, **_favorites_payload(current)}
+        if args.json:
+            _print(payload, True)
+            return 0
+        if current.empty:
+            print("Favorites are empty. Use 'pno favorites add ...' or the TUI tab.")
+            return 0
+        print(f"Path:        {payload['path']}")
+        print(f"Countries:   {', '.join(current.countries) or '-'}")
+        print(f"Secure Core: {', '.join(current.secure_core_servers) or '-'}")
+        return 0
+
+    current = favorites_module.load()
+    if sub == "clear":
+        path = favorites_module.save(favorites_module.Favorites())
+        payload = {"ok": True, "cleared": True, "path": str(path)}
+        _print(payload, True) if args.json else print("Favorites cleared")
+        return 0
+
+    text = _favorites_input(args)
+    if sub == "remove":
+        parsed = favorites_module.parse_removal_text(text)
+    else:
+        snapshot = _favorites_snapshot(config)
+        parsed = favorites_module.parse_text(text, snapshot)
+    _favorites_errors(parsed)
+    assert parsed.favorites is not None
+
+    if sub == "set":
+        updated = parsed.favorites
+    elif sub == "add":
+        updated = favorites_module.Favorites(
+            countries=tuple(set(current.countries) | set(parsed.favorites.countries)),
+            secure_core_servers=tuple(
+                set(current.secure_core_servers)
+                | set(parsed.favorites.secure_core_servers)
+            ),
+        ).normalized()
+    elif sub == "remove":
+        countries = set(current.countries) - set(parsed.favorites.countries)
+        servers = set(current.secure_core_servers) - set(
+            parsed.favorites.secure_core_servers
+        )
+        updated = favorites_module.Favorites(
+            countries=tuple(countries), secure_core_servers=tuple(servers)
+        ).normalized()
+    else:  # pragma: no cover - argparse prevents this
+        raise PnoError("unknown favorites command", detail=sub)
+
+    path = favorites_module.save(updated)
+    payload = {
+        **_favorites_payload(updated),
+        "ok": True,
+        "warnings": list(parsed.warnings),
+    }
+    if args.json:
+        _print(payload, True)
+    else:
+        print(f"Saved: {path}")
+        print(f"Countries:   {', '.join(updated.countries) or '-'}")
+        print(f"Secure Core: {', '.join(updated.secure_core_servers) or '-'}")
+        for warning in parsed.warnings:
+            print(f"warning: {warning}")
     return 0
 
 
@@ -748,6 +892,29 @@ def _cmd_tray(args: argparse.Namespace) -> int:
 def _cmd_logs(args: argparse.Namespace) -> int:
     from pno import log_query
 
+    if args.prune:
+        config = config_module.load()
+        keep = args.keep_files if args.keep_files is not None else config.log_keep_files
+        age = (
+            args.max_age_days
+            if args.max_age_days is not None
+            else config.log_max_age_days
+        )
+        if keep < 0 or age < 0:
+            raise PnoError("log limits cannot be negative")
+        events.configure_from_config(config)
+        result = events.prune(keep_files=keep, max_age_days=age)
+        events.emit("info", "logs", "logs.prune", result.to_dict())
+        if args.json:
+            _print(result.to_dict(), True)
+        else:
+            print(
+                f"Removed {len(result.removed)} archive files "
+                f"({result.removed_bytes} bytes); "
+                f"{result.remaining_files} remaining"
+            )
+        return 0
+
     files = (
         log_query.resolve_files(args.paths) if args.paths else log_query.default_files()
     )
@@ -778,7 +945,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
     from pno.install import install
 
     config = config_module.ensure()
-    events.configure(paths.logs_dir(), level=config.log_level)
+    events.configure_from_config(config)
     result = install(
         assume_yes=args.yes,
         no_sudo=args.no_sudo,

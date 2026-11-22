@@ -10,7 +10,8 @@ The tool **never switches the VPN by itself**. It measures, ranks and shows;
 you press Connect.
 
 - CLI and Textual TUI
-- Country flags, search and an "inventory only" filter in both server views
+- Country flags, search and a "favorites only" filter in both server views
+- Personal Favorites tab with a visual checklist and a validated text editor
 - Secure Core: every route in the TUI, aggregates per exit country in the CLI
 - Explicit Disconnect button and CLI command
 - Single-instance TUI: the tray raises the existing window instead of opening a second one
@@ -19,7 +20,7 @@ you press Connect.
 - Mirror refresh on VPN exit change, on a schedule, and on demand
 - Background daemon with pause/resume, persisted across reboots
 - Tray icon and a KDE application-menu entry on Wayland
-- Machine-readable JSONL event log with a query command
+- Machine-readable JSONL event log with a query command and configurable retention limits
 - Crash-safe: atomic writes, locks, timeouts, retries, no partial files
 - Startup component checks in the TUI, tray and daemon
 
@@ -80,7 +81,11 @@ pno servers --top 10             # all countries, least-loaded servers first
 pno servers --country UA,DE      # narrow the view
 pno servers --secure-core        # aggregate Secure Core view
 pno servers --secure-core --routes  # every Secure Core route
-pno servers --inventory          # only countries/routes from the inventory
+pno servers --favorites          # only countries/routes in your favorites
+pno favorites list               # show personal favorites
+pno favorites add UA CH-US#3      # validate and add entries
+pno favorites set --file f.txt    # replace from one entry per line
+pno favorites clear              # remove all favorites
 pno connect CH-US#3              # explicitly connect (you decide)
 pno connect CH-US#3 --close-gui  # close a running Proton GUI, then connect
 pno disconnect                   # disconnect now
@@ -92,6 +97,7 @@ pno launch                       # full interface in the configured terminal
 pno tray                         # tray icon (autostarted by pno install)
 pno daemon status|pause|resume|reload|shutdown
 pno logs --level warning --since -2h
+pno logs --prune                  # apply retention limits now
 ```
 
 Every command that returns structured data also accepts `--json`.
@@ -100,10 +106,11 @@ Every command that returns structured data also accepts `--json`.
 
 | Tab | Contents |
 | --- | --- |
-| Servers | All countries (best load first) and the top-N least-loaded servers in each, with flags, search and an inventory filter |
-| Secure Core | All Secure Core routes with entry/exit flags, load, score, city and an inventory marker; search and inventory filter |
+| Servers | All countries (best load first) and the top-N least-loaded servers in each, with flags, search and a favorites filter |
+| Secure Core | All Secure Core routes with entry/exit flags, load, score, city and a favorites marker; search and favorites filter |
+| Favorites | Personal regular countries and Secure Core routes; visual checklist on the left, validated text editor on the right |
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
-| Logs | Tail of the JSONL event stream |
+| Logs | Tail of the JSONL event stream plus editable retention limits |
 | Settings | Top-N, home country, terminal, language (EN/UK) |
 
 Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
@@ -134,16 +141,24 @@ then `kdotool`, `wmctrl` or `xdotool`). It never opens a second window; if the
 window cannot be raised, a desktop notification says the TUI is already
 running.
 
-Session state (active tab, both search queries, inventory checkboxes and the
+Session state (active tab, both search queries, favorites checkboxes and the
 selected country/server/Secure Core route) is stored in
 `~/.local/state/proton-net-optimizer/tui.json` and restored on the next launch.
 It is written atomically and debounced, and flushed on exit.
 
 Search is case-insensitive; several words are combined with AND. It matches
 country codes and names (EN/UK), load values, server counts, server names and
-cities. The “Inventory only” checkbox uses `pno/data/inventory.toml`:
-`CH, DE, IS, JP, PL, SE, UA, US` for regular countries and the exact Secure
-Core routes for the Secure Core tab.
+cities. The “Favorites only” checkbox uses your personal
+`~/.config/proton-net-optimizer/inventory.toml`: regular countries and exact
+Secure Core routes. Edit it from the Favorites tab or with `pno favorites`.
+The repository ships an empty template; personal entries are never committed.
+
+The Favorites tab has a visual checklist on the left and a text editor on the
+right. Editing one side locks the other until **Apply** saves and synchronizes
+both (or **Revert** restores the last saved state). Text entries may be country
+codes, English/Ukrainian country names, or Secure Core routes such as
+`CH-US#3`; unknown entries and forbidden characters are rejected with line
+numbers.
 
 If the Proton VPN GUI is running while a VPN connection is active, connecting
 from the TUI opens a dialog. **Yes** closes the GUI, disconnects, and connects
@@ -171,11 +186,11 @@ hard-coded.
 
 ### Secure Core
 
-The inventory (`pno/data/inventory.toml`) lists the Secure Core logical servers
-the setup knows about, e.g. `CH-US#3` = entry Switzerland, exit United States.
-The TUI lists all available routes (entry → exit, load, score, city) and marks
-the inventory ones. The CLI keeps the aggregate per exit country: the
-percentage is the lowest load among eligible routes for that country.
+Favorites may list specific Secure Core logical servers, e.g. `CH-US#3` =
+entry Switzerland, exit United States. The TUI lists all available routes
+(entry → exit, load, score, city) and marks the selected ones. The CLI keeps
+the aggregate per exit country: the percentage is the lowest load among
+eligible routes for that country.
 
 ### Mirrors
 
@@ -210,12 +225,26 @@ A systemd user service (`pno-daemon.service`):
 
 `pno daemon pause` stops only automatic work; manual commands still run.
 
+## Personal data
+
+User-specific data never lives in the repository:
+
+- favorites: `~/.config/proton-net-optimizer/inventory.toml`;
+- configuration: `~/.config/proton-net-optimizer/config.toml`;
+- TUI session state, server/mirror caches and logs:
+  `~/.local/state/proton-net-optimizer/`;
+- daemon socket: `$XDG_RUNTIME_DIR/proton-net-optimizer/`.
+
+The repository ships an empty favorites template and `.gitignore` covers the
+common local paths. Back up the configuration directory if you want to keep
+your favorites and settings.
+
 ## Files
 
 | Path | Purpose |
 | --- | --- |
 | `~/.config/proton-net-optimizer/config.toml` | configuration |
-| `~/.config/proton-net-optimizer/inventory.toml` | optional inventory override |
+| `~/.config/proton-net-optimizer/inventory.toml` | personal favorites (never committed) |
 | `~/.local/state/proton-net-optimizer/state.json` | shared state |
 | `~/.local/state/proton-net-optimizer/servers.json` | compact server cache |
 | `~/.local/state/proton-net-optimizer/mirrors_status.json` | Arch status cache |
@@ -256,6 +285,9 @@ A systemd user service (`pno-daemon.service`):
 | `language` | `"en"` | `en` or `uk`; English is the default, changed only by the user |
 | `terminal` | `""` | terminal used by “Open TUI”; empty means auto-detect |
 | `log_level` | `"info"` | `debug`, `info`, `warning`, `error` |
+| `log_max_bytes` | `20971520` | rotate the active log at this size |
+| `log_keep_files` | `10` | keep the newest N archive files |
+| `log_max_age_days` | `30` | delete archives older than N days (`0` = disabled) |
 
 ## Logs
 
@@ -274,8 +306,12 @@ pno logs --event 'mirrors.*' --summary
 pno logs --component vpn --limit 50
 ```
 
-Rotated at 20 MB into `logs/archive/`. A torn last line (power loss) is
-ignored by the reader.
+Rotated at `log_max_bytes` into `logs/archive/`. Retention is enforced at
+startup, after each rotation and on demand: the active file is never deleted,
+only old archives. Writes, rotation and pruning share an `flock` so several pno
+processes cannot delete live data. A torn last line (power loss) is ignored by
+the reader. Limits can be changed in the TUI **Logs** tab or with
+`pno logs --prune --keep-files N --max-age-days N`.
 
 ## Reliability and security
 
@@ -307,8 +343,9 @@ Alacritty, Foot, WezTerm or XTerm when the key is empty.
   `mirrorlist` is system-wide. The user service, sudoers rule and backups are
   installed per user, but they all target the same system file.
 - `home_country` defaults to `UA`; set it to your own country for the no-VPN
-  case. The server inventory is an example that can be replaced with
-  `~/.config/proton-net-optimizer/inventory.toml`.
+  case. Favorites are personal data in
+  `~/.config/proton-net-optimizer/inventory.toml`; the repository template is
+  empty. Never commit a user's favorites or runtime logs.
 - The terminal is auto-detected when `terminal` is empty; set it explicitly if
   the tray/menu should use another emulator.
 - Configuration and state stay in XDG directories; no credentials are stored

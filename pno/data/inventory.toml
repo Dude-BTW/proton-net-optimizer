@@ -1,28 +1,17 @@
-# Servers and countries currently known to the setup.
+# Empty favorites template.
 #
-# This file is data, not a ranking: entries are never ordered by preference
-# and the tool derives every ordering from measurements.
+# The real, user-specific inventory is stored outside the repository at:
+#   ~/.config/proton-net-optimizer/inventory.toml
 #
 # Secure Core logical servers are named ENTRY-EXIT#N (for example CH-US#3:
 # traffic enters through Switzerland and leaves through the United States).
-# The plain two-letter entries are regular countries the user tracks; the
-# "all countries" view is not limited to them.
+# The plain two-letter entries are regular countries.
 
 [secure_core]
-servers = [
-  "IS-US#1",
-  "CH-JP#2",
-  "CH-US#3",
-  "CH-DE#2",
-  "CH-PL#2",
-  "CH-UA#2",
-  "SE-PL#1",
-  "SE-UA#1",
-]
-# Exit countries shown as aggregate rows in the Secure Core view. Derived from
-# the server names above when left empty.
-exits = ["US", "JP", "DE", "PL", "UA"]
+servers = []
+# Exit countries are derived from the server names above.
+exits = []
 
 [countries]
-known = ["IS", "CH", "SE"]
+known = []
 include_all = true

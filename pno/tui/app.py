@@ -22,13 +22,16 @@ from textual.widgets import (
     Label,
     RichLog,
     Select,
+    SelectionList,
     Static,
     TabbedContent,
     TabPane,
+    TextArea,
 )
 
 from pno import config as config_module
 from pno import events
+from pno import favorites as favorites_module
 from pno import inventory as inventory_module
 from pno import log_query, paths
 from pno.config import Config
@@ -53,7 +56,7 @@ from pno.requirements import RequirementReport, check_requirements
 from pno.state import StateStore
 from pno.tui import theme
 from pno.tui.filtering import filter_countries, filter_routes
-from pno.tui.flags import country_label, server_label
+from pno.tui.flags import country_label, flag, server_label
 from pno.tui.i18n import get_language, set_language, tr
 from pno.tui.modals import GuiConflictScreen, RequirementsScreen
 from pno.tui.state import TAB_IDS, TuiState, TuiStateStore
@@ -90,6 +93,12 @@ class PnoApp(App[None]):
         self.selected_server: str | None = saved_state.selected_server
         self.selected_secure_server: str | None = saved_state.selected_secure_server
         self.secure_route_map: dict[str, Server] = {}
+        self.favorites_saved = favorites_module.Favorites()
+        self.favorites_dirty_side: str | None = None
+        self._favorites_syncing = False
+        self._favorites_text_draft = ""
+        self._favorites_visual_draft: set[str] = set()
+        self._favorites_visible_values: set[str] = set()
 
         self.servers_query = saved_state.servers_query
         self.secure_query = saved_state.secure_query
@@ -160,6 +169,45 @@ class PnoApp(App[None]):
                             id="secure-connect-btn",
                             variant="success",
                         )
+            with TabPane(tr("tab.favorites"), id="tab-favorites"):
+                with Vertical(id="favorites-layout"):
+                    yield Static(tr("favorites.hint"), id="favorites-hint")
+                    with Horizontal(id="favorites-panels"):
+                        with Vertical(id="favorites-visual-panel"):
+                            yield Static(
+                                tr("favorites.visual_title"),
+                                classes="favorites-title",
+                                id="favorites-visual-title",
+                            )
+                            with Horizontal(id="favorites-filters"):
+                                yield Checkbox(
+                                    tr("favorites.regular"),
+                                    value=True,
+                                    id="favorites-regular",
+                                )
+                                yield Checkbox(
+                                    tr("favorites.secure"),
+                                    value=True,
+                                    id="favorites-secure",
+                                )
+                            yield SelectionList(id="favorites-list")
+                            yield Static("", id="favorites-visual-status")
+                        with Vertical(id="favorites-text-panel"):
+                            yield Static(
+                                tr("favorites.text_title"),
+                                classes="favorites-title",
+                                id="favorites-text-title",
+                            )
+                            yield TextArea(id="favorites-text")
+                            yield Static("", id="favorites-text-status")
+                    with Horizontal(id="favorites-actions"):
+                        yield Button(
+                            tr("favorites.apply"),
+                            id="favorites-apply",
+                            variant="primary",
+                        )
+                        yield Button(tr("favorites.revert"), id="favorites-revert")
+                        yield Static("", id="favorites-status")
             with TabPane(tr("tab.mirrors"), id="tab-mirrors"):
                 with Vertical(id="mirror-layout"):
                     yield Static("", id="mirror-info")
@@ -177,7 +225,32 @@ class PnoApp(App[None]):
                             variant="primary",
                         )
             with TabPane(tr("tab.logs"), id="tab-logs"):
-                yield RichLog(id="log-view", wrap=True, highlight=False)
+                with Vertical(id="logs-layout"):
+                    with Horizontal(id="log-controls"):
+                        yield Label(tr("logs.max_size"), id="label-log-size")
+                        yield Input(
+                            value=str(self.config.log_max_bytes // (1024 * 1024)),
+                            id="log-max-size",
+                            type="integer",
+                        )
+                        yield Label(tr("logs.keep_files"), id="label-log-keep")
+                        yield Input(
+                            value=str(self.config.log_keep_files),
+                            id="log-keep-files",
+                            type="integer",
+                        )
+                        yield Label(tr("logs.max_age"), id="label-log-age")
+                        yield Input(
+                            value=str(self.config.log_max_age_days),
+                            id="log-max-age",
+                            type="integer",
+                        )
+                        yield Button(
+                            tr("logs.apply"), id="log-apply-btn", variant="primary"
+                        )
+                        yield Button(tr("logs.prune"), id="log-prune-btn")
+                    yield Static("", id="log-stats")
+                    yield RichLog(id="log-view", wrap=True, highlight=False)
             with TabPane(tr("tab.settings"), id="tab-settings"):
                 with Vertical(id="settings-layout"):
                     yield Label(tr("settings.top_n"), id="label-top-n")
@@ -214,6 +287,8 @@ class PnoApp(App[None]):
         self._load_mirror_overview()
         self._refresh_status()
         self._refresh_logs()
+        self._refresh_log_stats()
+        self._reload_favorites()
         tabs = self.query_one("#tabs", TabbedContent)
         if self._restore_tab in TAB_IDS:
             tabs.active = self._restore_tab
@@ -428,6 +503,175 @@ class PnoApp(App[None]):
         self.query_one(f"#{widget_id}", Static).update(
             tr("servers.count", shown=shown, total=total)
         )
+
+    # ------------------------------------------------------------- favorites
+    def _reload_favorites(self) -> None:
+        try:
+            self.favorites_saved = favorites_module.load()
+        except PnoError as exc:
+            self.favorites_saved = favorites_module.Favorites()
+            self.notify(str(exc), severity="error", timeout=8)
+        self.favorites_dirty_side = None
+        self.query_one("#favorites-text-status", Static).update("")
+        self._sync_favorites_text()
+        self._rebuild_favorites_visual()
+        self._update_favorites_controls()
+
+    def _sync_favorites_text(self) -> None:
+        text = favorites_module.normalized_text(self.favorites_saved)
+        self._favorites_text_draft = text
+        self._favorites_syncing = True
+        try:
+            self.query_one("#favorites-text", TextArea).text = text
+        finally:
+            self._favorites_syncing = False
+
+    def _rebuild_favorites_visual(self, selected: set[str] | None = None) -> None:
+        widget = self.query_one("#favorites-list", SelectionList)
+        status = self.query_one("#favorites-visual-status", Static)
+        if selected is None:
+            selected = favorites_module.selection_values(self.favorites_saved)
+        self._favorites_visual_draft = set(selected)
+        self._favorites_visible_values = set()
+        self._favorites_syncing = True
+        try:
+            widget.clear_options()
+            if self.snapshot is None:
+                status.update(tr("favorites.no_data"))
+                return
+            show_regular = self.query_one("#favorites-regular", Checkbox).value
+            show_secure = self.query_one("#favorites-secure", Checkbox).value
+            options: list[tuple[str, str, bool]] = []
+            regular_count = 0
+            secure_count = 0
+            if show_regular:
+                countries = regular_countries(
+                    self.snapshot,
+                    top_n=1,
+                    include_tor=self.config.include_tor,
+                    max_tier=self.snapshot.max_tier or None,
+                )
+                for country in sorted(countries, key=lambda item: item.code):
+                    value = f"country:{country.code}"
+                    options.append(
+                        (
+                            country_label(country.code, get_language()),
+                            value,
+                            value in selected,
+                        )
+                    )
+                    self._favorites_visible_values.add(value)
+                    regular_count += 1
+            if show_secure:
+                routes = secure_core_routes(
+                    self.snapshot,
+                    max_tier=self.snapshot.max_tier or None,
+                    include_tor=self.config.include_tor,
+                )
+                for route in sorted(
+                    routes, key=lambda item: (item.exit_code, item.name)
+                ):
+                    value = f"sc:{route.name}"
+                    label = (
+                        f"{flag(route.entry_code)} {route.entry_code} → "
+                        f"{flag(route.exit_code)} {route.exit_code}  {route.name}"
+                    )
+                    options.append((label, value, value in selected))
+                    self._favorites_visible_values.add(value)
+                    secure_count += 1
+            if options:
+                widget.add_options(options)
+            status.update(
+                tr(
+                    "favorites.visual_count",
+                    regular=regular_count,
+                    secure=secure_count,
+                )
+            )
+        finally:
+            self.call_after_refresh(self._release_favorites_sync)
+
+    def _release_favorites_sync(self) -> None:
+        self._favorites_syncing = False
+
+    def _set_favorites_dirty(self, side: str) -> None:
+        self.favorites_dirty_side = side
+        self._update_favorites_controls()
+
+    def _update_favorites_controls(self) -> None:
+        side = self.favorites_dirty_side
+        text = self.query_one("#favorites-text", TextArea)
+        visual = self.query_one("#favorites-list", SelectionList)
+        visual.disabled = side == "text"
+        text.read_only = side == "visual"
+        apply_button = self.query_one("#favorites-apply", Button)
+        revert_button = self.query_one("#favorites-revert", Button)
+        apply_button.disabled = side is None
+        revert_button.disabled = side is None
+        status = self.query_one("#favorites-status", Static)
+        if side == "text":
+            status.update(tr("favorites.locked_text"))
+        elif side == "visual":
+            status.update(tr("favorites.locked_visual"))
+        else:
+            status.update("")
+
+    def _favorites_text_errors(self, errors) -> None:
+        detail = "\n".join(f"line {error.line}: {error.message}" for error in errors)
+        self.query_one("#favorites-text-status", Static).update(detail)
+        self.notify(tr("favorites.invalid"), severity="error", timeout=8)
+
+    def _apply_favorites(self) -> None:
+        side = self.favorites_dirty_side
+        if side is None:
+            self.notify(tr("favorites.no_changes"), severity="information")
+            return
+        if self.snapshot is None:
+            self.query_one("#favorites-text-status", Static).update(
+                tr("favorites.no_data")
+            )
+            return
+
+        self.query_one("#favorites-text-status", Static).update("")
+        if side == "text":
+            result = favorites_module.parse_text(
+                self.query_one("#favorites-text", TextArea).text,
+                self.snapshot,
+            )
+            if result.errors:
+                self._favorites_text_errors(result.errors)
+                return
+            assert result.favorites is not None
+            updated = result.favorites
+        else:
+            selected = set(self.query_one("#favorites-list", SelectionList).selected)
+            updated = favorites_module.from_selection(selected)
+
+        try:
+            favorites_module.save(updated)
+        except PnoError as exc:
+            self.notify(exc.message, severity="error", timeout=8)
+            return
+        self.favorites_saved = updated.normalized()
+        self.favorites_dirty_side = None
+        self.query_one("#favorites-text-status", Static).update("")
+        self._sync_favorites_text()
+        self._rebuild_favorites_visual()
+        self._update_favorites_controls()
+        self.notify(tr("favorites.saved"), severity="information")
+
+    def _revert_favorites(self) -> None:
+        try:
+            self.favorites_saved = favorites_module.load()
+        except PnoError as exc:
+            self.notify(exc.message, severity="error", timeout=8)
+            return
+        self.favorites_dirty_side = None
+        self.query_one("#favorites-text-status", Static).update("")
+        self._sync_favorites_text()
+        self._rebuild_favorites_visual()
+        self._update_favorites_controls()
+        self.notify(tr("favorites.reverted"), severity="information")
 
     def _load_mirror_overview(self) -> None:
         try:
@@ -674,6 +918,70 @@ class PnoApp(App[None]):
         for event in events_list:
             view.write(log_query.format_text(event))
 
+    def _format_bytes(self, value: int) -> str:
+        if value >= 1024 * 1024:
+            return f"{value / (1024 * 1024):.1f} MB"
+        if value >= 1024:
+            return f"{value / 1024:.1f} kB"
+        return f"{value} B"
+
+    def _refresh_log_stats(self) -> None:
+        stats = events.log_stats()
+        self.query_one("#log-stats", Static).update(
+            tr(
+                "logs.stats",
+                active=self._format_bytes(stats.active_bytes),
+                archives=stats.archive_files,
+                total=self._format_bytes(stats.total_bytes),
+            )
+        )
+
+    def _apply_log_limits(self) -> None:
+        try:
+            size_mb = int(self.query_one("#log-max-size", Input).value)
+            keep = int(self.query_one("#log-keep-files", Input).value)
+            age = int(self.query_one("#log-max-age", Input).value)
+        except ValueError:
+            self.notify(tr("logs.invalid"), severity="error")
+            return
+        if size_mb < 1 or keep < 0 or age < 0:
+            self.notify(tr("logs.invalid"), severity="error")
+            return
+        updated = dataclasses.replace(
+            self.config,
+            log_max_bytes=size_mb * 1024 * 1024,
+            log_keep_files=keep,
+            log_max_age_days=age,
+        )
+        try:
+            updated.validate()
+        except PnoError as exc:
+            self.notify(exc.message, severity="error")
+            return
+        config_module.save(updated)
+        self.config = updated
+        events.configure_from_config(self.config)
+        events.prune()
+        self._refresh_logs()
+        self._refresh_log_stats()
+        self._reload_daemon_config()
+        self.notify(tr("logs.saved"), severity="information")
+
+    def _prune_logs(self) -> None:
+        result = events.prune()
+        events.emit(
+            "info",
+            "logs",
+            "logs.prune",
+            result.to_dict(),
+        )
+        self._refresh_logs()
+        self._refresh_log_stats()
+        self.notify(
+            tr("logs.pruned", removed=len(result.removed)),
+            severity="information",
+        )
+
     def _tick(self) -> None:
         self._load_snapshot_from_disk()
         self._refresh_status()
@@ -682,6 +990,7 @@ class PnoApp(App[None]):
         tabs = self.query_one("#tabs", TabbedContent)
         if tabs.active == "tab-logs":
             self._refresh_logs()
+            self._refresh_log_stats()
         if tabs.active == "tab-mirrors" and self.mirror_result is None:
             self._load_mirror_overview()
         self._remote_status_worker()
@@ -749,6 +1058,11 @@ class PnoApp(App[None]):
         self._populate_countries()
         self._populate_secure_core()
         self._refresh_status()
+        if not self.favorites_dirty_side:
+            self._reload_favorites()
+        else:
+            selected = set(self.query_one("#favorites-list", SelectionList).selected)
+            self._rebuild_favorites_visual(selected)
         if self.snapshot is not None:
             self.notify(
                 tr("notify.refreshed", count=len(self.snapshot.servers)),
@@ -926,6 +1240,50 @@ class PnoApp(App[None]):
         self._populate_countries()
         self._mark_state_dirty()
 
+    @on(TextArea.Changed, "#favorites-text")
+    def _on_favorites_text(self, event: TextArea.Changed) -> None:
+        if self._favorites_syncing:
+            return
+        if (
+            self.query_one("#favorites-text", TextArea).text
+            == self._favorites_text_draft
+        ):
+            return
+        if self.favorites_dirty_side is None:
+            self._set_favorites_dirty("text")
+        elif self.favorites_dirty_side != "text":
+            return
+
+    @on(SelectionList.SelectedChanged, "#favorites-list")
+    def _on_favorites_selection(self, event: SelectionList.SelectedChanged) -> None:
+        if self._favorites_syncing:
+            return
+        visible_selected = set(event.selection_list.selected)
+        selected = (
+            self._favorites_visual_draft - self._favorites_visible_values
+        ) | visible_selected
+        if selected == self._favorites_visual_draft:
+            return
+        self._favorites_visual_draft = selected
+        if self.favorites_dirty_side is None:
+            self._set_favorites_dirty("visual")
+        elif self.favorites_dirty_side != "visual":
+            return
+
+    @on(Checkbox.Changed, "#favorites-regular")
+    def _on_favorites_regular(self, event: Checkbox.Changed) -> None:
+        self._favorites_filter_changed()
+
+    @on(Checkbox.Changed, "#favorites-secure")
+    def _on_favorites_secure(self, event: Checkbox.Changed) -> None:
+        self._favorites_filter_changed()
+
+    def _favorites_filter_changed(self) -> None:
+        if self._favorites_syncing:
+            return
+        selected = set(self.query_one("#favorites-list", SelectionList).selected)
+        self._rebuild_favorites_visual(selected)
+
     @on(Checkbox.Changed, "#servers-inventory")
     def _on_servers_inventory(self, event: Checkbox.Changed) -> None:
         self.servers_inventory_only = bool(event.value)
@@ -974,6 +1332,22 @@ class PnoApp(App[None]):
     @on(Button.Pressed, "#disconnect-btn")
     def _on_disconnect(self) -> None:
         self.action_disconnect()
+
+    @on(Button.Pressed, "#favorites-apply")
+    def _on_favorites_apply(self) -> None:
+        self._apply_favorites()
+
+    @on(Button.Pressed, "#favorites-revert")
+    def _on_favorites_revert(self) -> None:
+        self._revert_favorites()
+
+    @on(Button.Pressed, "#log-apply-btn")
+    def _on_log_apply(self) -> None:
+        self._apply_log_limits()
+
+    @on(Button.Pressed, "#log-prune-btn")
+    def _on_log_prune(self) -> None:
+        self._prune_logs()
 
     @on(Button.Pressed, "#mirror-preview-btn")
     def _on_mirror_preview(self) -> None:
@@ -1127,6 +1501,7 @@ class PnoApp(App[None]):
         for tab_id, key in (
             ("tab-servers", "tab.servers"),
             ("tab-secure", "tab.secure"),
+            ("tab-favorites", "tab.favorites"),
             ("tab-mirrors", "tab.mirrors"),
             ("tab-logs", "tab.logs"),
             ("tab-settings", "tab.settings"),
@@ -1154,6 +1529,25 @@ class PnoApp(App[None]):
             "servers.inventory_only"
         )
         self.query_one("#secure-connect-btn", Button).label = tr("secure.connect")
+        self.query_one("#favorites-hint", Static).update(tr("favorites.hint"))
+        self.query_one("#favorites-visual-title", Static).update(
+            tr("favorites.visual_title")
+        )
+        self.query_one("#favorites-text-title", Static).update(
+            tr("favorites.text_title")
+        )
+        self.query_one("#favorites-regular", Checkbox).label = tr("favorites.regular")
+        self.query_one("#favorites-secure", Checkbox).label = tr("favorites.secure")
+        self.query_one("#favorites-apply", Button).label = tr("favorites.apply")
+        self.query_one("#favorites-revert", Button).label = tr("favorites.revert")
+        self.query_one("#label-log-size", Label).update(tr("logs.max_size"))
+        self.query_one("#label-log-keep", Label).update(tr("logs.keep_files"))
+        self.query_one("#label-log-age", Label).update(tr("logs.max_age"))
+        self.query_one("#log-apply-btn", Button).label = tr("logs.apply")
+        self.query_one("#log-prune-btn", Button).label = tr("logs.prune")
+        selected = self._favorites_visual_draft if self.favorites_dirty_side else None
+        self._rebuild_favorites_visual(selected)
+        self._update_favorites_controls()
         self.query_one("#mirror-preview-btn", Button).label = tr("mirrors.preview")
         self.query_one("#mirror-refresh-btn", Button).label = tr("mirrors.refresh")
         self.query_one("#auto-mirror", Checkbox).label = tr("mirrors.auto")

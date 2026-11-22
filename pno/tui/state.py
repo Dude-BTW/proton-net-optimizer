@@ -18,6 +18,7 @@ from pno.state import atomic_write_json, read_json
 TAB_IDS = (
     "tab-servers",
     "tab-secure",
+    "tab-favorites",
     "tab-mirrors",
     "tab-logs",
     "tab-settings",

@@ -388,6 +388,7 @@ class Daemon:
             return {"paused": False}
         if command == "config.reload":
             self.config = config_module.load()
+            events.configure_from_config(self.config)
             events.emit(
                 "info",
                 "daemon",
@@ -509,11 +510,7 @@ class Daemon:
 
 
 async def _run(config: Config, *, verbose: bool = False) -> None:
-    events.configure(
-        paths.logs_dir(),
-        level=config.log_level,
-        console=verbose,
-    )
+    events.configure_from_config(config, console=verbose)
     daemon = Daemon(config)
     loop = asyncio.get_running_loop()
 

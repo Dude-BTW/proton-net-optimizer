@@ -199,6 +199,82 @@ RequirementsScreen {
     margin-left: 2;
 }
 
+#favorites-layout {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#favorites-hint {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#favorites-panels {
+    height: 1fr;
+}
+
+#favorites-visual-panel {
+    width: 3fr;
+    height: 1fr;
+    padding-right: 1;
+}
+
+#favorites-text-panel {
+    width: 2fr;
+    height: 1fr;
+    padding-left: 1;
+}
+
+.favorites-title {
+    height: 1;
+    text-style: bold;
+    color: $text-muted;
+}
+
+#favorites-filters {
+    height: auto;
+    align: left middle;
+}
+
+#favorites-filters Checkbox {
+    width: auto;
+    margin-right: 2;
+}
+
+#favorites-list {
+    height: 1fr;
+    border: round $accent;
+}
+
+#favorites-text {
+    height: 1fr;
+    border: round $accent;
+}
+
+#favorites-visual-status,
+#favorites-text-status {
+    height: auto;
+    min-height: 1;
+    color: $text-muted;
+}
+
+#favorites-actions {
+    height: auto;
+    padding: 1 0;
+    align: left middle;
+}
+
+#favorites-actions Button {
+    margin-right: 2;
+}
+
+#favorites-status {
+    width: 1fr;
+    padding: 1 0;
+    color: $text-muted;
+}
+
 #mirror-layout {
     height: 1fr;
 }
@@ -224,6 +300,32 @@ RequirementsScreen {
 #auto-mirror {
     width: auto;
     margin-right: 2;
+}
+
+#logs-layout {
+    height: 1fr;
+}
+
+#log-controls {
+    height: auto;
+    align: left middle;
+    padding: 0 1;
+}
+
+#log-controls Label {
+    width: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#log-controls Input {
+    width: 8;
+}
+
+#log-stats {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
 }
 
 #log-view {

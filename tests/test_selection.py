@@ -23,13 +23,17 @@ def test_parse_secure_core_name():
 
 
 def test_inventory_country_codes_include_entries_and_exits():
-    assert load().country_codes() == ("CH", "DE", "IS", "JP", "PL", "SE", "UA", "US")
+    inventory = Inventory(
+        secure_core_servers=("IS-US#1", "CH-JP#2", "CH-US#3"),
+        known_countries=("CH", "DE"),
+    )
+    assert inventory.country_codes() == ("CH", "DE", "IS", "JP", "US")
 
 
-def test_inventory_defaults_contain_the_documented_entries():
+def test_packaged_inventory_is_empty():
     inventory = load()
-    assert "CH-US#3" in inventory.secure_core_servers
-    assert set(inventory.exits()) == {"US", "JP", "DE", "PL", "UA"}
+    assert inventory.secure_core_servers == ()
+    assert inventory.known_countries == ()
 
 
 def test_regular_countries_top_n_and_order():

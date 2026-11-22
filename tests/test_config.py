@@ -72,3 +72,19 @@ def test_language_change_is_persisted(tmp_path):
     config.language = "uk"
     config_module.save(config, path)
     assert config_module.load(path).language == "uk"
+
+
+def test_log_defaults():
+    config = Config().validate()
+    assert config.log_max_bytes == 20 * 1024 * 1024
+    assert config.log_keep_files == 10
+    assert config.log_max_age_days == 30
+
+
+def test_log_limits_validation():
+    with pytest.raises(ConfigError):
+        Config(log_max_bytes=0).validate()
+    with pytest.raises(ConfigError):
+        Config(log_keep_files=-1).validate()
+    with pytest.raises(ConfigError):
+        Config(log_max_age_days=-1).validate()

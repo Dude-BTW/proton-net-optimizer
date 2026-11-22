@@ -239,7 +239,7 @@ def install(
     no_start: bool = False,
 ) -> dict[str, Any]:
     config = config_module.ensure()
-    events.configure(paths.logs_dir(), level=config.log_level)
+    events.configure_from_config(config)
     events.emit("info", "install", "install.start", {"user": getpass.getuser()})
     result: dict[str, Any] = {"config": str(paths.config_file())}
 
@@ -302,7 +302,7 @@ def uninstall(
     purge: bool = False,
 ) -> dict[str, Any]:
     config = config_module.load()
-    events.configure(paths.logs_dir(), level=config.log_level)
+    events.configure_from_config(config)
     events.emit("info", "install", "uninstall.start")
     result: dict[str, Any] = {}
 

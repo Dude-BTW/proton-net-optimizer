@@ -271,7 +271,7 @@ def _acquire_single_instance_lock():
 def main() -> int:
     config = config_module.ensure()
     set_language(config.language)
-    events.configure(paths.logs_dir(), level=config.log_level)
+    events.configure_from_config(config)
     lock = _acquire_single_instance_lock()
     if lock is None:
         return 0

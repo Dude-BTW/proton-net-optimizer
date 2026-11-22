@@ -4,8 +4,18 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from textual.widgets import Button, Checkbox, DataTable, Input, Static, TabbedContent
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Input,
+    SelectionList,
+    Static,
+    TabbedContent,
+    TextArea,
+)
 
+from pno import favorites as favorites_module
 from pno import paths
 from pno.proton.serverlist import snapshot_from_payload
 from pno.tui import app as tui_app
@@ -27,7 +37,24 @@ class _TestApp(tui_app.PnoApp):
         return None
 
 
+def seed_favorites() -> None:
+    target = paths.user_inventory_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        """[secure_core]
+servers = ["CH-US#3"]
+exits = []
+
+[countries]
+known = ["UA", "DE"]
+include_all = true
+""",
+        encoding="utf-8",
+    )
+
+
 def seed_servers() -> None:
+    seed_favorites()
     snapshot = snapshot_from_payload(
         helper_payload(
             [
@@ -279,6 +306,111 @@ def test_language_change_is_remembered(monkeypatch, tmp_path):
         second = _TestApp()
         assert second.config.language == "uk"
         assert tr("servers.connect") == "Підключити"
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_favorites_tab_loads_and_locks_are_synced(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            tabs = app.query_one("#tabs", TabbedContent)
+            assert tabs.get_tab("tab-favorites")
+            selection = app.query_one("#favorites-list", SelectionList)
+            text = app.query_one("#favorites-text", TextArea)
+            assert text.text == "DE\nUA\nCH-US#3\n"
+            assert set(selection.selected) == {
+                "country:DE",
+                "country:UA",
+                "sc:CH-US#3",
+            }
+
+            # Visual filter changes only the visible options.
+            app.query_one("#favorites-regular", Checkbox).value = False
+            app._favorites_filter_changed()
+            await pilot.pause()
+            assert selection.option_count == 2
+            app.query_one("#favorites-regular", Checkbox).value = True
+            app._favorites_filter_changed()
+            await pilot.pause()
+
+            # Editing text locks the visual list.
+            text.text = "CH-US#3\n"
+            await pilot.pause()
+            assert app.favorites_dirty_side == "text"
+            assert selection.disabled is True
+            app._apply_favorites()
+            await pilot.pause()
+            assert app.favorites_dirty_side is None
+            assert selection.disabled is False
+            assert favorites_module.load().countries == ()
+            assert favorites_module.load().secure_core_servers == ("CH-US#3",)
+
+            # Visual editing locks the text editor.
+            selection.select("country:FR")
+            await pilot.pause()
+            assert app.favorites_dirty_side == "visual"
+            assert text.read_only is True
+            app._apply_favorites()
+            await pilot.pause()
+            assert app.favorites_dirty_side is None
+            assert "FR" in favorites_module.load().countries
+            assert text.text.startswith("FR\n")
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_favorites_revert_restores_last_saved_state(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            text = app.query_one("#favorites-text", TextArea)
+            original = text.text
+            text.text = "invalid entry @@@"
+            await pilot.pause()
+            assert app.favorites_dirty_side == "text"
+            app._revert_favorites()
+            await pilot.pause()
+            assert app.favorites_dirty_side is None
+            assert text.text == original
+            assert app.query_one("#favorites-list", SelectionList).disabled is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_log_limits_are_editable_in_the_tui(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            assert app.query_one("#log-max-size", Input)
+            assert app.query_one("#log-keep-files", Input)
+            assert app.query_one("#log-max-age", Input)
+            app.query_one("#log-max-size", Input).value = "5"
+            app.query_one("#log-keep-files", Input).value = "3"
+            app.query_one("#log-max-age", Input).value = "7"
+            app._apply_log_limits()
+            await pilot.pause()
+            from pno import config as config_module
+
+            loaded = config_module.load()
+            assert loaded.log_max_bytes == 5 * 1024 * 1024
+            assert loaded.log_keep_files == 3
+            assert loaded.log_max_age_days == 7
         set_language("en")
 
     asyncio.run(scenario())

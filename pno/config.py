@@ -48,6 +48,9 @@ class Config:
     language: str = "en"
     terminal: str = ""
     log_level: str = "info"
+    log_max_bytes: int = 20 * 1024 * 1024
+    log_keep_files: int = 10
+    log_max_age_days: int = 30
     proton_helper_timeout: float = 40.0
 
     def validate(self) -> "Config":
@@ -82,6 +85,18 @@ class Config:
             )
         if self.language not in {"en", "uk"}:
             raise ConfigError("language must be 'en' or 'uk'", detail=self.language)
+        if self.log_max_bytes <= 0:
+            raise ConfigError(
+                "log_max_bytes must be positive", detail=str(self.log_max_bytes)
+            )
+        if self.log_keep_files < 0:
+            raise ConfigError(
+                "log_keep_files cannot be negative", detail=str(self.log_keep_files)
+            )
+        if self.log_max_age_days < 0:
+            raise ConfigError(
+                "log_max_age_days cannot be negative", detail=str(self.log_max_age_days)
+            )
         self.home_country = self.home_country.upper()
         if len(self.home_country) != 2:
             raise ConfigError(
@@ -113,6 +128,9 @@ _TYPE_COERCE = {
     "mirror_count": int,
     "mirror_global_candidates": int,
     "mirror_probe_attempts": int,
+    "log_max_bytes": int,
+    "log_keep_files": int,
+    "log_max_age_days": int,
     "include_tor": bool,
     "auto_mirror": bool,
     "auto_mirror_on_vpn_change": bool,

@@ -46,6 +46,27 @@ def country_name(code: str | None, language: str = "en") -> str:
     return str(name)
 
 
+@functools.lru_cache(maxsize=1)
+def _name_index() -> dict[str, tuple[str, ...]]:
+    index: dict[str, list[str]] = {}
+    for code, entry in _load().get("countries", {}).items():
+        for language in ("en", "uk"):
+            value = entry.get(language)
+            if not value:
+                continue
+            key = " ".join(str(value).casefold().split())
+            codes = index.setdefault(key, [])
+            if code not in codes:
+                codes.append(code)
+    return {key: tuple(codes) for key, codes in index.items()}
+
+
+def codes_for_name(value: str) -> tuple[str, ...]:
+    """Resolve a country name in English or Ukrainian to canonical codes."""
+    key = " ".join(value.casefold().split())
+    return _name_index().get(key, ())
+
+
 def arch_code(proton_code: str | None) -> str:
     """Code to look up in the Arch mirror status."""
     return normalize_code(proton_code)

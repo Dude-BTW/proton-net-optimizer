@@ -79,3 +79,46 @@ def test_launch_command_exists():
     parser = build_parser()
     args = parser.parse_args(["launch"])
     assert args.command == "launch"
+
+
+def test_favorites_commands_and_aliases():
+    parser = build_parser()
+    args = parser.parse_args(["favorites", "set", "UA", "CH-US#3", "--json"])
+    assert args.favorites_command == "set"
+    assert args.entries == ["UA", "CH-US#3"]
+    assert args.json is True
+    args = parser.parse_args(["servers", "--favorites"])
+    assert args.inventory is True
+
+
+def test_logs_prune_flags():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["logs", "--prune", "--keep-files", "3", "--max-age-days", "7"]
+    )
+    assert args.prune is True
+    assert args.keep_files == 3
+    assert args.max_age_days == 7
+
+
+def test_logs_prune_command(tmp_path, capsys, monkeypatch):
+    import json
+
+    from pno import paths
+
+    archive = paths.logs_dir() / "archive"
+    archive.mkdir(parents=True)
+    active = paths.logs_dir() / "events.jsonl"
+    active.write_text("active\n", encoding="utf-8")
+    for index in range(3):
+        (archive / f"events-{index}.jsonl").write_text("x", encoding="utf-8")
+    from pno.cli import main
+
+    code = main(
+        ["logs", "--prune", "--keep-files", "1", "--max-age-days", "0", "--json"]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["removed"]) == 2
+    assert active.is_file()
+    assert len(list(archive.glob("*.jsonl"))) == 1

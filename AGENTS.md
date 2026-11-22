@@ -25,18 +25,15 @@ it must never switch servers on its own.
   Call `.venv/bin/python` directly; do not rely on activation between agent
   shell calls.
 
-## Server inventory
-`pno/data/inventory.toml` holds the entries the setup knows about:
-
-`IS-US#1, IS, CH-JP#2, CH-US#3, CH-DE#2, CH-PL#2, CH-UA#2, CH, SE-PL#1, SE-UA#1, SE`
-
-- `ENTRY-EXIT#N` entries are Secure Core logical servers; `CH-US#3` means entry
-  Switzerland, exit United States.
-- Bare two-letter entries are regular countries the user tracks.
-- The inventory is **data only**: never encode a preference or order between
-  entries, countries or mirrors. Every order is computed from live data.
-- The “all countries” server view is not limited to the inventory; the
-  inventory defines Secure Core aggregates and favourites.
+## Personal data
+- User favorites live only in `~/.config/proton-net-optimizer/inventory.toml`.
+  Never hardcode a user's countries, servers or other personal preferences in
+  tracked files or in this AGENTS.md.
+- `pno/data/inventory.toml` is an **empty template** shipped with the project.
+- Runtime state, logs and the TUI session file live under XDG directories and
+  are ignored by git.
+- Favorites are data only: never encode a preference or order between entries.
+  Every ordering is computed from live measurements.
 
 ## Data sources
 - Server loads: `pno/proton/fetch_helper.py`, executed with `/usr/bin/python3`
@@ -55,7 +52,7 @@ it must never switch servers on its own.
 - The project is distributed under GPL-3.0-only; new files must remain
   compatible with that license.
 - Secure Core servers are outside automatic selection. The TUI lists every
-  route with search and an inventory filter; the CLI keeps aggregates per exit
+  route with search and a favorites filter; the CLI keeps aggregates per exit
   country and offers `--secure-core --routes`.
 - No hardcoded priority between servers, countries or mirrors.
 - Credentials never enter the repo; read them from Proton's own storage or
@@ -94,7 +91,8 @@ it must never switch servers on its own.
 - The daemon must survive network loss, crashes and reboot. Pause state,
   schedule and last errors are persisted in `state.json`.
 - Machine logs are JSONL in `$XDG_STATE_HOME/proton-net-optimizer/logs/`.
-  Redact secrets, rotate by size, tolerate a torn last line.
+  Redact secrets, rotate by size, tolerate a torn last line. Writes, rotation
+  and retention pruning share an `flock`; never delete the active file.
 - TUI table filters and search live in `pno/tui/filtering.py`; keep them pure
   and offline-testable. Country flags are emoji (`pno/tui/flags.py`), not
   assets, with a plain-code fallback.
@@ -104,6 +102,11 @@ it must never switch servers on its own.
 - TUI session state (tab, queries, filters, selected rows) is persisted in
   `tui.json` via `pno/tui/state.py`; save it atomically, debounced, and on
   unmount.
+- The Favorites tab edits one shared set through two synchronized editors
+  (visual checklist and validated text). Editing one side locks the other until
+  Apply saves or Revert restores the last saved state.
+- Log retention is configurable (`log_max_bytes`, `log_keep_files`,
+  `log_max_age_days`) and exposed in the Logs tab and `pno logs --prune`.
 - The connected server's live load and the best alternatives must stay
   visible in the TUI status area, derived from the current server snapshot
   (`current_server_info`), so the user can judge whether switching is useful.
@@ -122,6 +125,8 @@ it must never switch servers on its own.
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.
 - `pno/requirements.py` — startup component checks shared by TUI/tray/daemon.
+- `pno/favorites.py` — personal favorites parsing/validation/saving; uses only
+  `~/.config/proton-net-optimizer/inventory.toml`.
 - `pno/proton/` — helper, cache, status, selection, GUI detection, actions.
 - `pno/mirrors/` — status, probe, planner, apply, root helper.
 - `pno/tui/` — Textual UI, filters, flags, modals and i18n; `pno/tray/` — PySide6 tray.
