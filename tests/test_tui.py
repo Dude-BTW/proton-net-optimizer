@@ -541,6 +541,54 @@ def test_tui_proton_split_mode_loads_its_own_app_list(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_tui_proton_cards_share_one_control_width(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 60)) as pilot:
+            await pilot.pause()
+            tabs = app.query_one("#tabs", TabbedContent)
+            tabs.active = "tab-proton"
+            await pilot.pause()
+            widths = {
+                "select": app.query_one("#proton-netshield", Select).outer_size.width,
+                "input": app.query_one("#proton-dns", Input).outer_size.width,
+                "checkbox": app.query_one("#proton-ipv6", Checkbox).outer_size.width,
+                "textarea": app.query_one(
+                    "#proton-split-apps", TextArea
+                ).outer_size.width,
+            }
+            assert len(set(widths.values())) == 1, widths
+            assert widths["select"] > 0
+            card = app.query_one("#proton-card-features")
+            assert card.size.width <= 80
+            assert card.parent is app.query_one("#proton-layout")
+            actions = app.query_one("#proton-actions")
+            assert actions.parent is app.query_one("#proton-actions-row")
+            assert actions.parent.parent is app.query_one("#proton-tab")
+            assert actions.outer_size.width == card.outer_size.width
+            from textual.color import Color
+
+            from pno.tui import theme
+
+            for card_id, color in (
+                ("proton-card-account", theme.CARD_ACCOUNT_BG),
+                ("proton-card-features", theme.CARD_FEATURES_BG),
+                ("proton-card-connection", theme.CARD_CONNECTION_BG),
+                ("proton-card-general", theme.CARD_GENERAL_BG),
+                ("proton-card-gui", theme.CARD_GUI_BG),
+            ):
+                widget = app.query_one(f"#{card_id}")
+                assert widget.styles.background == Color.parse(color)
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
 def test_tui_proton_apply_writes_changes(monkeypatch):
     seed_servers()
     seed_proton_settings()

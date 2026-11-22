@@ -129,6 +129,9 @@ it must never switch servers on its own.
   keys, skip the write when nothing changed, refuse to write while the Proton
   VPN GUI is running, and require a disconnected VPN for protocol, kill switch
   and split tunneling. NetShield and custom DNS stay mutually exclusive.
+- The Proton VPN tab groups settings into dark cards from `pno/tui/theme.py`;
+  every form control has the same width, and Apply/Revert stay fixed below the
+  scroll area.
 
 ## Layout
 - `pno/cli.py` — argparse entry point; `pno/daemon.py` — scheduler and IPC.

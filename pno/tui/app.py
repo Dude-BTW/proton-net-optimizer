@@ -128,6 +128,20 @@ class PnoApp(App[None]):
         self._pending_gui_action: str | None = None
         self._pending_gui_server: str | None = None
 
+    def get_css_variables(self) -> dict[str, str]:
+        variables = super().get_css_variables()
+        variables.update(
+            {
+                "proton-bg-account": theme.CARD_ACCOUNT_BG,
+                "proton-bg-features": theme.CARD_FEATURES_BG,
+                "proton-bg-connection": theme.CARD_CONNECTION_BG,
+                "proton-bg-general": theme.CARD_GENERAL_BG,
+                "proton-bg-gui": theme.CARD_GUI_BG,
+                "proton-border": theme.CARD_BORDER,
+            }
+        )
+        return variables
+
     # ------------------------------------------------------------- composition
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -264,210 +278,257 @@ class PnoApp(App[None]):
                     yield Static("", id="log-stats")
                     yield RichLog(id="log-view", wrap=True, highlight=False)
             with TabPane(tr("tab.proton"), id="tab-proton"):
-                with VerticalScroll(id="proton-layout"):
+                with Vertical(id="proton-tab"):
                     yield Static("", id="proton-banner")
-                    yield Static(
-                        tr("proton.account"),
-                        classes="proton-section",
-                        id="proton-account-title",
-                    )
-                    with Horizontal(id="proton-account-row"):
-                        yield Static("", id="proton-account")
-                        yield Button(
-                            tr("proton.account.manage"), id="proton-manage-btn"
-                        )
-                    yield Static("", id="proton-account-help", classes="proton-help")
+                    with VerticalScroll(id="proton-layout"):
+                        with Vertical(classes="proton-card", id="proton-card-account"):
+                            yield Static(
+                                tr("proton.account"),
+                                classes="proton-section",
+                                id="proton-account-title",
+                            )
+                            with Horizontal(id="proton-account-row"):
+                                yield Static("", id="proton-account")
+                                yield Button(
+                                    tr("proton.account.manage"),
+                                    id="proton-manage-btn",
+                                )
+                            yield Static(
+                                "", id="proton-account-help", classes="proton-help"
+                            )
 
-                    yield Static(
-                        tr("proton.features"),
-                        classes="proton-section",
-                        id="proton-features-title",
-                    )
-                    yield Label(
-                        tr("proton.netshield"),
-                        classes="proton-label",
-                        id="proton-netshield-label",
-                    )
-                    yield Select(
-                        [
-                            (tr("proton.netshield.off"), "off"),
-                            (tr("proton.netshield.malware-only"), "malware-only"),
-                            (
-                                tr("proton.netshield.malware-ads-trackers"),
-                                "malware-ads-trackers",
-                            ),
-                        ],
-                        value="off",
-                        id="proton-netshield",
-                        allow_blank=False,
-                    )
-                    yield Static(
-                        tr("proton.netshield.help"),
-                        id="proton-netshield-help",
-                        classes="proton-help",
-                    )
-                    yield Label(
-                        tr("proton.killswitch"),
-                        classes="proton-label",
-                        id="proton-killswitch-label",
-                    )
-                    yield Select(
-                        [
-                            (tr("proton.killswitch.off"), "off"),
-                            (tr("proton.killswitch.standard"), "standard"),
-                            (tr("proton.killswitch.advanced"), "advanced"),
-                        ],
-                        value="off",
-                        id="proton-killswitch",
-                        allow_blank=False,
-                    )
-                    yield Static(
-                        tr("proton.killswitch.help"),
-                        id="proton-killswitch-help",
-                        classes="proton-help",
-                    )
-                    yield Static(
-                        tr("proton.killswitch.advanced_note"),
-                        id="proton-killswitch-note",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(
-                        tr("proton.port_forwarding"),
-                        id="proton-port-forwarding",
-                    )
-                    yield Static(
-                        tr("proton.port_forwarding.help"),
-                        id="proton-port-forwarding-help",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(tr("proton.split"), id="proton-split")
-                    yield Static(
-                        tr("proton.split.help"),
-                        id="proton-split-help",
-                        classes="proton-help",
-                    )
-                    yield Label(
-                        tr("proton.split.mode"),
-                        classes="proton-label",
-                        id="proton-split-mode-label",
-                    )
-                    yield Select(
-                        [
-                            (tr("proton.split.exclude"), "exclude"),
-                            (tr("proton.split.include"), "include"),
-                        ],
-                        value="exclude",
-                        id="proton-split-mode",
-                        allow_blank=False,
-                    )
-                    yield Label(
-                        tr("proton.split.apps"),
-                        classes="proton-label",
-                        id="proton-split-apps-label",
-                    )
-                    yield TextArea(
-                        placeholder=tr("proton.split.apps_placeholder"),
-                        id="proton-split-apps",
-                    )
-                    with Horizontal(id="proton-split-actions"):
-                        yield Button(
-                            tr("proton.split.add_running"),
-                            id="proton-add-app-btn",
-                        )
+                        with Vertical(classes="proton-card", id="proton-card-features"):
+                            yield Static(
+                                tr("proton.features"),
+                                classes="proton-section",
+                                id="proton-features-title",
+                            )
+                            with Vertical(classes="proton-field"):
+                                yield Label(
+                                    tr("proton.netshield"),
+                                    classes="proton-label",
+                                    id="proton-netshield-label",
+                                )
+                                yield Select(
+                                    [
+                                        (tr("proton.netshield.off"), "off"),
+                                        (
+                                            tr("proton.netshield.malware-only"),
+                                            "malware-only",
+                                        ),
+                                        (
+                                            tr("proton.netshield.malware-ads-trackers"),
+                                            "malware-ads-trackers",
+                                        ),
+                                    ],
+                                    value="off",
+                                    id="proton-netshield",
+                                    allow_blank=False,
+                                )
+                                yield Static(
+                                    tr("proton.netshield.help"),
+                                    id="proton-netshield-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Label(
+                                    tr("proton.killswitch"),
+                                    classes="proton-label",
+                                    id="proton-killswitch-label",
+                                )
+                                yield Select(
+                                    [
+                                        (tr("proton.killswitch.off"), "off"),
+                                        (
+                                            tr("proton.killswitch.standard"),
+                                            "standard",
+                                        ),
+                                        (
+                                            tr("proton.killswitch.advanced"),
+                                            "advanced",
+                                        ),
+                                    ],
+                                    value="off",
+                                    id="proton-killswitch",
+                                    allow_blank=False,
+                                )
+                                yield Static(
+                                    tr("proton.killswitch.help"),
+                                    id="proton-killswitch-help",
+                                    classes="proton-help",
+                                )
+                                yield Static(
+                                    tr("proton.killswitch.advanced_note"),
+                                    id="proton-killswitch-note",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.port_forwarding"),
+                                    id="proton-port-forwarding",
+                                )
+                                yield Static(
+                                    tr("proton.port_forwarding.help"),
+                                    id="proton-port-forwarding-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(tr("proton.split"), id="proton-split")
+                                yield Static(
+                                    tr("proton.split.help"),
+                                    id="proton-split-help",
+                                    classes="proton-help",
+                                )
+                                yield Label(
+                                    tr("proton.split.mode"),
+                                    classes="proton-label",
+                                    id="proton-split-mode-label",
+                                )
+                                yield Select(
+                                    [
+                                        (tr("proton.split.exclude"), "exclude"),
+                                        (tr("proton.split.include"), "include"),
+                                    ],
+                                    value="exclude",
+                                    id="proton-split-mode",
+                                    allow_blank=False,
+                                )
+                                yield Label(
+                                    tr("proton.split.apps"),
+                                    classes="proton-label",
+                                    id="proton-split-apps-label",
+                                )
+                                yield TextArea(
+                                    placeholder=tr("proton.split.apps_placeholder"),
+                                    id="proton-split-apps",
+                                )
+                                with Horizontal(id="proton-split-actions"):
+                                    yield Button(
+                                        tr("proton.split.add_running"),
+                                        id="proton-add-app-btn",
+                                    )
 
-                    yield Static(
-                        tr("proton.connection"),
-                        classes="proton-section",
-                        id="proton-connection-title",
-                    )
-                    yield Checkbox(tr("proton.protun"), id="proton-protun")
-                    yield Static(
-                        tr("proton.protun.help"),
-                        id="proton-protun-help",
-                        classes="proton-help",
-                    )
-                    yield Label(
-                        tr("proton.protocol"),
-                        classes="proton-label",
-                        id="proton-protocol-label",
-                    )
-                    yield Select(
-                        [
-                            (option.label, option.id)
-                            for option in proton_settings.FALLBACK_PROTOCOLS
-                            if option.family == "generic"
-                        ],
-                        value="wireguard",
-                        id="proton-protocol",
-                        allow_blank=False,
-                    )
-                    yield Static(
-                        tr("proton.protocol.help"),
-                        id="proton-protocol-help",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(tr("proton.accelerator"), id="proton-accelerator")
-                    yield Static(
-                        tr("proton.accelerator.help"),
-                        id="proton-accelerator-help",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(tr("proton.moderate_nat"), id="proton-moderate-nat")
-                    yield Static(
-                        tr("proton.moderate_nat.help"),
-                        id="proton-moderate-nat-help",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(tr("proton.ipv6"), id="proton-ipv6")
-                    yield Static(
-                        tr("proton.ipv6.help"),
-                        id="proton-ipv6-help",
-                        classes="proton-help",
-                    )
-                    yield Checkbox(tr("proton.custom_dns"), id="proton-custom-dns")
-                    yield Static(
-                        tr("proton.custom_dns.help"),
-                        id="proton-custom-dns-help",
-                        classes="proton-help",
-                    )
-                    yield Label(
-                        tr("proton.custom_dns.ips"),
-                        classes="proton-label",
-                        id="proton-dns-label",
-                    )
-                    yield Input(
-                        placeholder=tr("proton.dns_placeholder"), id="proton-dns"
-                    )
+                        with Vertical(
+                            classes="proton-card", id="proton-card-connection"
+                        ):
+                            yield Static(
+                                tr("proton.connection"),
+                                classes="proton-section",
+                                id="proton-connection-title",
+                            )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(tr("proton.protun"), id="proton-protun")
+                                yield Static(
+                                    tr("proton.protun.help"),
+                                    id="proton-protun-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Label(
+                                    tr("proton.protocol"),
+                                    classes="proton-label",
+                                    id="proton-protocol-label",
+                                )
+                                yield Select(
+                                    [
+                                        (option.label, option.id)
+                                        for option in proton_settings.FALLBACK_PROTOCOLS
+                                        if option.family == "generic"
+                                    ],
+                                    value="wireguard",
+                                    id="proton-protocol",
+                                    allow_blank=False,
+                                )
+                                yield Static(
+                                    tr("proton.protocol.help"),
+                                    id="proton-protocol-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.accelerator"), id="proton-accelerator"
+                                )
+                                yield Static(
+                                    tr("proton.accelerator.help"),
+                                    id="proton-accelerator-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.moderate_nat"),
+                                    id="proton-moderate-nat",
+                                )
+                                yield Static(
+                                    tr("proton.moderate_nat.help"),
+                                    id="proton-moderate-nat-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(tr("proton.ipv6"), id="proton-ipv6")
+                                yield Static(
+                                    tr("proton.ipv6.help"),
+                                    id="proton-ipv6-help",
+                                    classes="proton-help",
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.custom_dns"), id="proton-custom-dns"
+                                )
+                                yield Static(
+                                    tr("proton.custom_dns.help"),
+                                    id="proton-custom-dns-help",
+                                    classes="proton-help",
+                                )
+                                yield Label(
+                                    tr("proton.custom_dns.ips"),
+                                    classes="proton-label",
+                                    id="proton-dns-label",
+                                )
+                                yield Input(
+                                    placeholder=tr("proton.dns_placeholder"),
+                                    id="proton-dns",
+                                )
 
-                    yield Static(
-                        tr("proton.general"),
-                        classes="proton-section",
-                        id="proton-general-title",
-                    )
-                    yield Checkbox(tr("proton.telemetry"), id="proton-telemetry")
-                    yield Checkbox(
-                        tr("proton.crash_reports"), id="proton-crash-reports"
-                    )
+                        with Vertical(classes="proton-card", id="proton-card-general"):
+                            yield Static(
+                                tr("proton.general"),
+                                classes="proton-section",
+                                id="proton-general-title",
+                            )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.telemetry"), id="proton-telemetry"
+                                )
+                            with Vertical(classes="proton-field"):
+                                yield Checkbox(
+                                    tr("proton.crash_reports"),
+                                    id="proton-crash-reports",
+                                )
 
-                    yield Static(
-                        tr("proton.gui_app"),
-                        classes="proton-section",
-                        id="proton-gui-title",
-                    )
-                    yield Static("", id="proton-gui-app", classes="proton-help")
-                    yield Static(
-                        tr("proton.gui_app.hint"),
-                        id="proton-gui-help",
-                        classes="proton-help",
-                    )
-                    with Horizontal(id="proton-actions"):
-                        yield Button(
-                            tr("proton.apply"),
-                            id="proton-apply-btn",
-                            variant="primary",
-                        )
-                        yield Button(tr("proton.revert"), id="proton-revert-btn")
-                        yield Static("", id="proton-status")
+                        with Vertical(classes="proton-card", id="proton-card-gui"):
+                            yield Static(
+                                tr("proton.gui_app"),
+                                classes="proton-section",
+                                id="proton-gui-title",
+                            )
+                            with Vertical(classes="proton-field"):
+                                yield Static(
+                                    "", id="proton-gui-app", classes="proton-help"
+                                )
+                                yield Static(
+                                    tr("proton.gui_app.hint"),
+                                    id="proton-gui-help",
+                                    classes="proton-help",
+                                )
+                    with Horizontal(id="proton-actions-row"):
+                        with Horizontal(id="proton-actions"):
+                            yield Button(
+                                tr("proton.apply"),
+                                id="proton-apply-btn",
+                                variant="primary",
+                            )
+                            yield Button(tr("proton.revert"), id="proton-revert-btn")
+                            yield Static("", id="proton-status")
             with TabPane(tr("tab.settings"), id="tab-settings"):
                 with Vertical(id="settings-layout"):
                     yield Label(tr("settings.top_n"), id="label-top-n")

@@ -1,8 +1,8 @@
-"""Colour palette and styles for the Textual status area.
+"""Colour palette and styles for the Textual interface.
 
 Catppuccin Mocha (https://catppuccin.com/palette/) with a traffic-light load
-indicator. Keep these values in one place so the status bar, the Current band
-and future widgets stay consistent.
+indicator. Keep these values in one place so the status bar, the Current band,
+the grouped Proton VPN cards and future widgets stay consistent.
 """
 
 from __future__ import annotations
@@ -17,6 +17,14 @@ TEAL = "#94e2d5"
 MAUVE = "#cba6f7"
 SEPARATOR = "#45475a"
 CURRENT_BG = "#1e1e2e"
+
+# Dark, Catppuccin Mocha-derived surfaces for the grouped Proton VPN cards.
+CARD_ACCOUNT_BG = "#11111b"
+CARD_FEATURES_BG = "#181825"
+CARD_CONNECTION_BG = "#212132"
+CARD_GENERAL_BG = "#252538"
+CARD_GUI_BG = "#2d2d42"
+CARD_BORDER = SEPARATOR
 
 LOAD_LOW = 40
 LOAD_HIGH = 70

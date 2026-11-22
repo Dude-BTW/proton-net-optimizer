@@ -354,24 +354,66 @@ RequirementsScreen {
     width: 20;
 }
 
-#proton-layout {
+#proton-tab {
     height: 1fr;
-    padding: 1 2;
 }
 
 #proton-banner {
     height: auto;
-    min-height: 1;
+    min-height: 0;
+    padding: 0 2;
     color: $warning;
     text-style: bold;
-    padding-bottom: 1;
+}
+
+#proton-layout {
+    height: 1fr;
+    padding: 1 2;
+    align: center top;
+}
+
+.proton-card {
+    width: 1fr;
+    max-width: 80;
+    height: auto;
+    padding: 1 2;
+    margin-bottom: 1;
+    border: solid $proton-border;
+}
+
+#proton-card-account {
+    background: $proton-bg-account;
+}
+
+#proton-card-features {
+    background: $proton-bg-features;
+}
+
+#proton-card-connection {
+    background: $proton-bg-connection;
+}
+
+#proton-card-general {
+    background: $proton-bg-general;
+}
+
+#proton-card-gui {
+    background: $proton-bg-gui;
 }
 
 .proton-section {
+    width: 100%;
     height: auto;
-    margin-top: 1;
+    margin-bottom: 1;
     text-style: bold;
     color: $accent;
+}
+
+.proton-field {
+    width: 100%;
+    height: auto;
+    padding: 1 0;
+    border-bottom: solid $proton-border;
 }
 
 .proton-label {
@@ -381,13 +423,31 @@ RequirementsScreen {
 }
 
 .proton-help {
+    width: 100%;
     height: auto;
     color: $text-muted;
 }
 
 #proton-layout Select,
-#proton-layout Input {
-    width: 48;
+#proton-layout Input,
+#proton-layout TextArea,
+#proton-layout Checkbox {
+    width: 100%;
+}
+
+#proton-layout Input,
+#proton-layout TextArea,
+#proton-layout Checkbox,
+#proton-layout SelectCurrent {
+    border: tall $proton-border;
+    background: transparent;
+}
+
+#proton-layout Input:focus,
+#proton-layout TextArea:focus,
+#proton-layout Checkbox:focus,
+#proton-layout Select:focus > SelectCurrent {
+    border: tall $accent;
 }
 
 #proton-account-row {
@@ -397,46 +457,55 @@ RequirementsScreen {
 
 #proton-account {
     width: 1fr;
-    padding: 0 1;
+    padding: 0;
+}
+
+#proton-manage-btn {
+    width: 24;
 }
 
 #proton-account-help {
-    padding: 0 1;
+    width: 100%;
 }
 
 #proton-split-apps {
     height: 6;
-    width: 60;
-    border: round $accent;
 }
 
 #proton-split-actions {
     height: auto;
-    padding: 1 0;
+    padding-top: 1;
+}
+
+#proton-actions-row {
+    width: 1fr;
+    height: auto;
+    align: center middle;
 }
 
 #proton-actions {
+    width: 1fr;
+    max-width: 80;
     height: auto;
     padding: 1 0;
+    border-top: solid $proton-border;
     align: left middle;
 }
 
 #proton-actions Button {
+    width: 20;
     margin-right: 2;
 }
 
 #proton-status {
     width: 1fr;
-    padding: 1 0;
+    padding: 0 1;
     color: $text-muted;
 }
 
-#proton-gui-app {
-    padding: 0 1;
-}
-
+#proton-gui-app,
 #proton-gui-help {
-    padding: 0 1;
+    width: 100%;
 }
 
 RunningAppScreen {
