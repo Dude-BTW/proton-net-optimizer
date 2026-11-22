@@ -97,6 +97,8 @@ def test_unchanged_when_server_lines_match(tmp_path):
 def test_apply_calls_helper_and_parses_result(tmp_path):
     target = tmp_path / "mirrorlist"
     target.write_text("Server = https://old.example/archlinux/$repo/os/$arch\n")
+    helper = tmp_path / "helper"
+    helper.write_text("")
     calls = []
 
     def runner(command, **kwargs):
@@ -112,19 +114,21 @@ def test_apply_calls_helper_and_parses_result(tmp_path):
         )
 
     outcome = apply_plan(
-        plan(), Config(), mirrorlist_path=target, helper=Path("/helper"), runner=runner
+        plan(), Config(), mirrorlist_path=target, helper=helper, runner=runner
     )
     assert outcome.applied is True
     assert outcome.servers == 2
     assert calls[0][0][0] == "sudo"
     assert calls[0][0][1] == "-n"
-    assert calls[0][0][2] == "/helper"
+    assert calls[0][0][2] == str(helper)
     assert "input_text" in calls[0][1]
 
 
 def test_apply_reports_sudo_password_requirement(tmp_path):
     target = tmp_path / "mirrorlist"
     target.write_text("Server = https://old.example/archlinux/$repo/os/$arch\n")
+    helper = tmp_path / "helper"
+    helper.write_text("")
 
     def runner(command, **kwargs):
         return result(stderr="sudo: a password is required", code=1)
@@ -134,7 +138,7 @@ def test_apply_reports_sudo_password_requirement(tmp_path):
             plan(),
             Config(),
             mirrorlist_path=target,
-            helper=Path("/helper"),
+            helper=helper,
             runner=runner,
         )
 
@@ -142,6 +146,8 @@ def test_apply_reports_sudo_password_requirement(tmp_path):
 def test_apply_reports_helper_rejection(tmp_path):
     target = tmp_path / "mirrorlist"
     target.write_text("Server = https://old.example/archlinux/$repo/os/$arch\n")
+    helper = tmp_path / "helper"
+    helper.write_text("")
 
     def runner(command, **kwargs):
         return result(stdout=json.dumps({"ok": False, "error": "invalid"}), code=2)
@@ -151,7 +157,7 @@ def test_apply_reports_helper_rejection(tmp_path):
             plan(),
             Config(),
             mirrorlist_path=target,
-            helper=Path("/helper"),
+            helper=helper,
             runner=runner,
         )
 
@@ -159,8 +165,32 @@ def test_apply_reports_helper_rejection(tmp_path):
 def test_missing_helper_is_reported(tmp_path):
     target = tmp_path / "mirrorlist"
     target.write_text("Server = https://old.example/archlinux/$repo/os/$arch\n")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return result()
+
     with pytest.raises(PrivilegeError):
-        apply_plan(plan(), Config(), mirrorlist_path=target, helper=tmp_path / "nope")
+        apply_plan(
+            plan(),
+            Config(),
+            mirrorlist_path=target,
+            helper=tmp_path / "nope",
+            runner=runner,
+        )
+    assert calls == []
+
+
+def test_missing_sudo_is_reported(tmp_path, monkeypatch):
+    target = tmp_path / "mirrorlist"
+    target.write_text("Server = https://old.example/archlinux/$repo/os/$arch\n")
+    helper = tmp_path / "helper"
+    helper.write_text("")
+    monkeypatch.setattr("pno.mirrors.apply.shutil.which", lambda name: None)
+    with pytest.raises(PrivilegeError) as excinfo:
+        apply_plan(plan(), Config(), mirrorlist_path=target, helper=helper)
+    assert excinfo.value.hint
 
 
 def test_apply_helper_dry_run_accepts_valid_input():

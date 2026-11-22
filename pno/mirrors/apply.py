@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +71,11 @@ def _run_helper(
     pacman_sync: bool,
     runner: Callable[..., CommandResult],
 ) -> dict[str, Any]:
+    if runner is run and shutil.which("sudo") is None:
+        raise PrivilegeError(
+            "sudo is not installed",
+            hint="Install sudo, or run the mirror helper manually as root.",
+        )
     command = [
         "sudo",
         "-n",
@@ -175,7 +181,7 @@ def apply_plan(
         return result
 
     helper_path = helper or find_helper()
-    if helper_path is None:
+    if helper_path is None or not helper_path.is_file():
         raise PrivilegeError(
             "the privileged mirror helper is not installed",
             hint="Run 'pno install' first (it installs /usr/local/lib/pno/pno-mirror-apply).",
