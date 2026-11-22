@@ -1569,6 +1569,7 @@ class PnoApp(App[None]):
         self._load_mirror_overview()
         self._refresh_status()
         self._refresh_logs()
+        self._refresh_log_stats()
 
 
 def run() -> None:
