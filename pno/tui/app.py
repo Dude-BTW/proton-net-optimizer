@@ -1508,13 +1508,16 @@ class PnoApp(App[None]):
         selected_hosts = {
             mirror.get("host") for mirror in (payload.get("selected") or [])
         }
-        for item in candidates[:200]:
+        for position, item in enumerate(candidates[:200]):
             host = item.get("host") or ""
             status = (
                 "selected"
                 if host in selected_hosts
                 else ("ok" if item.get("ok") else (item.get("error") or "failed"))
             )
+            # One host may be listed twice (HTTP and HTTPS), so the URL is the
+            # unique row key; fall back to the position for malformed entries.
+            row_key = str(item.get("url") or f"candidate-{position}")
             table.add_row(
                 host,
                 item.get("country_code") or "-",
@@ -1522,7 +1525,7 @@ class PnoApp(App[None]):
                 f"{item['latency_ms']:.0f} ms" if item.get("latency_ms") else "-",
                 f"{item.get('score'):.2f}" if item.get("score") is not None else "-",
                 status,
-                key=host or None,
+                key=row_key,
             )
 
     # ----------------------------------------------------------------- status
@@ -1942,6 +1945,14 @@ class PnoApp(App[None]):
         elif action == "disconnect":
             self._disconnect_worker(close_gui=True)
 
+    def _mirror_crashed(self, event: str, exc: BaseException, *, apply: bool) -> None:
+        events.emit("error", "mirrors", event, {"apply": apply}, error=exc)
+        self.call_from_thread(
+            self.notify,
+            tr("notify.mirror_failed", error=f"{type(exc).__name__}: {exc}"),
+            severity="error",
+        )
+
     @work(thread=True, exclusive=True, group="mirrors")
     def _mirror_worker(self, apply: bool) -> None:
         self.call_from_thread(
@@ -1970,7 +1981,16 @@ class PnoApp(App[None]):
                     severity="error",
                 )
                 return
-        self.call_from_thread(self._after_mirrors, payload)
+            except Exception as exc:  # noqa: BLE001 - the TUI must stay alive
+                self._mirror_crashed("mirrors.worker.crashed", exc, apply=apply)
+                return
+        except Exception as exc:  # noqa: BLE001 - the TUI must stay alive
+            self._mirror_crashed("mirrors.worker.crashed", exc, apply=apply)
+            return
+        try:
+            self.call_from_thread(self._after_mirrors, payload)
+        except Exception as exc:  # noqa: BLE001 - a render bug must not kill the TUI
+            self._mirror_crashed("mirrors.render.crashed", exc, apply=apply)
 
     def _after_mirrors(self, payload: dict[str, Any]) -> None:
         self.mirror_result = payload

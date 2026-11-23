@@ -162,6 +162,47 @@ def test_tui_search_and_inventory_filters(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_mirror_table_keeps_http_and_https_rows_for_one_host(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            payload = {
+                "target_country": "CH",
+                "selected": [{"host": "mirror.puzzle.ch"}],
+                "candidates": [
+                    {
+                        "url": "https://mirror.puzzle.ch/archlinux/",
+                        "host": "mirror.puzzle.ch",
+                        "protocol": "https",
+                        "country_code": "CH",
+                        "ok": True,
+                        "latency_ms": 10.0,
+                        "score": 1.0,
+                    },
+                    {
+                        "url": "http://mirror.puzzle.ch/archlinux/",
+                        "host": "mirror.puzzle.ch",
+                        "protocol": "http",
+                        "country_code": "CH",
+                        "ok": True,
+                        "latency_ms": 12.0,
+                        "score": 1.0,
+                    },
+                ],
+            }
+            app._after_mirrors(payload)
+            await pilot.pause()
+            table = app.query_one("#mirror-table", DataTable)
+            assert table.row_count == 2
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
 def test_gui_conflict_modal_can_be_cancelled(monkeypatch):
     seed_servers()
     monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
