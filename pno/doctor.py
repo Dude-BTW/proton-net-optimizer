@@ -16,6 +16,9 @@ from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
 from pno.mirrors.apply import find_helper
+from pno.mirrors.pacman_db import HINT as PACMAN_DB_HINT
+from pno.mirrors.pacman_db import describe as describe_pacman_db
+from pno.mirrors.pacman_db import read_sync_databases
 from pno.mirrors.planner import server_lines
 from pno.proton.serverlist import DEFAULT_PROTON_CACHE
 
@@ -169,6 +172,29 @@ def run_checks(config: Config) -> list[dict[str, Any]]:
         checks.append(_check("mirrorlist", status, detail, hint))
     else:
         checks.append(_check("mirrorlist", LEVEL_WARN, f"{mirrorlist} does not exist"))
+
+    sync_db = read_sync_databases(
+        max_age_hours=config.pacman_db_max_age_hours,
+        max_skew_hours=config.pacman_db_max_skew_hours,
+    )
+    if sync_db.available and sync_db.databases:
+        checks.append(
+            _check(
+                "pacman sync",
+                LEVEL_WARN if sync_db.stale else LEVEL_OK,
+                describe_pacman_db(sync_db),
+                PACMAN_DB_HINT if sync_db.stale else "",
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "pacman sync",
+                LEVEL_WARN,
+                "no pacman sync databases found",
+                PACMAN_DB_HINT,
+            )
+        )
 
     try:
         ping = _daemon_state()

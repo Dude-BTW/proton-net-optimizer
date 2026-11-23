@@ -43,6 +43,18 @@ def test_mirror_count_cannot_exceed_the_pool():
         Config(mirror_count=30, mirror_global_candidates=10).validate()
 
 
+def test_sync_database_thresholds_must_be_positive():
+    assert Config().validate().pacman_db_max_age_hours == 24.0
+    assert Config().validate().pacman_db_max_skew_hours == 6.0
+    assert Config().validate().mirror_max_sync_skew_hours == 6.0
+    with pytest.raises(ConfigError):
+        Config(pacman_db_max_age_hours=0).validate()
+    with pytest.raises(ConfigError):
+        Config(pacman_db_max_skew_hours=-1).validate()
+    with pytest.raises(ConfigError):
+        Config(mirror_max_sync_skew_hours=0).validate()
+
+
 def test_ensure_creates_the_file(tmp_path, monkeypatch):
     monkeypatch.setenv("PNO_CONFIG_DIR", str(tmp_path / "cfg"))
     config = config_module.ensure()

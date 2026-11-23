@@ -37,6 +37,7 @@ from pno import log_query, paths
 from pno.config import Config
 from pno.errors import PnoError, SettingsError
 from pno.ipc import request
+from pno.mirrors.pacman_db import format_age_hours
 from pno.mirrors.service import mirrors_overview
 from pno.proton import settings as proton_settings
 from pno.proton.account import ProtonInfo, try_fetch_info
@@ -63,6 +64,27 @@ from pno.tui.flags import country_label, flag, server_label
 from pno.tui.i18n import get_language, set_language, tr
 from pno.tui.modals import GuiConflictScreen, RequirementsScreen, RunningAppScreen
 from pno.tui.state import TAB_IDS, TuiState, TuiStateStore
+
+
+def _sync_db_details(report: dict[str, Any]) -> list[str]:
+    """Localised fragments describing why the sync databases are stale."""
+    reasons = report.get("reasons") or []
+    databases = report.get("databases") or []
+    details: list[str] = []
+    if "too-old" in reasons and databases:
+        oldest = min(databases, key=lambda item: item.get("modified_at") or 0.0)
+        details.append(
+            tr(
+                "mirrors.sync_db_oldest",
+                name=oldest.get("name") or "?",
+                age=format_age_hours(oldest.get("age_hours")),
+            )
+        )
+    if "skewed" in reasons:
+        details.append(
+            tr("mirrors.sync_db_skew", age=format_age_hours(report.get("skew_hours")))
+        )
+    return details or [tr("mirrors.sync_db_attention")]
 
 
 class PnoApp(App[None]):
@@ -1473,6 +1495,26 @@ class PnoApp(App[None]):
             tr("mirrors.target", country=country, source=source),
             tr("mirrors.last", when=when),
         ]
+        sync = overview.get("pacman_db")
+        if isinstance(sync, dict):
+            hint = tr("mirrors.sync_db_hint")
+            if not sync.get("available"):
+                lines.append(tr("mirrors.sync_db_missing", hint=hint))
+            elif sync.get("stale"):
+                lines.append(
+                    tr(
+                        "mirrors.sync_db_stale",
+                        detail="; ".join(_sync_db_details(sync)),
+                        hint=hint,
+                    )
+                )
+            else:
+                lines.append(
+                    tr(
+                        "mirrors.sync_db_ok",
+                        age=format_age_hours(sync.get("oldest_age_hours")),
+                    )
+                )
         error = overview.get("mirror_error")
         if isinstance(error, dict):
             lines.append(

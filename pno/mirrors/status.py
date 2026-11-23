@@ -177,3 +177,28 @@ def eligible_mirrors(
 def mirrors_for_country(mirrors: Iterable[Mirror], country_code: str) -> list[Mirror]:
     wanted = country_code.upper()
     return [mirror for mirror in mirrors if mirror.country_code == wanted]
+
+
+def restrict_to_sync_generation(
+    mirrors: Iterable[Mirror],
+    *,
+    max_skew_hours: float = 6.0,
+    now: float | None = None,
+) -> list[Mirror]:
+    """Drop mirrors whose repository state trails the freshest candidate.
+
+    Arch's ``delay`` is the sync delay at the time the status was built, so an
+    eligible set can still mix mirrors from different sync generations. Writing
+    such a set produces 404s while one mirror is mid-sync. Mirrors with an
+    unknown ``last_sync`` are kept: the status feed simply did not measure them,
+    which is not evidence of lag.
+    """
+    items = list(mirrors)
+    ages = [(mirror, mirror_age_hours(mirror.last_sync, now)) for mirror in items]
+    known = [age for _, age in ages if age is not None]
+    if not known or max_skew_hours <= 0:
+        return items
+    anchor = min(known)
+    return [
+        mirror for mirror, age in ages if age is None or age - anchor <= max_skew_hours
+    ]

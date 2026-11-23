@@ -16,7 +16,11 @@ from pno.countries import country_name, normalize_code
 from pno.errors import ProbeError
 from pno.mirrors.models import Mirror, MirrorStatusSnapshot, ProbeResult
 from pno.mirrors.probe import probe_many
-from pno.mirrors.status import eligible_mirrors, mirrors_for_country
+from pno.mirrors.status import (
+    eligible_mirrors,
+    mirrors_for_country,
+    restrict_to_sync_generation,
+)
 
 SERVER_PREFIX = "Server = "
 
@@ -82,6 +86,11 @@ def build_candidates(
         min_completion=config.mirror_min_completion,
         max_delay_hours=config.mirror_max_delay_hours,
         max_age_hours=config.mirror_max_age_hours,
+        now=now,
+    )
+    eligible = restrict_to_sync_generation(
+        eligible,
+        max_skew_hours=config.mirror_max_sync_skew_hours,
         now=now,
     )
     country_mirrors = sorted(

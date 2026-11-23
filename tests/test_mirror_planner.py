@@ -32,6 +32,31 @@ def test_candidates_include_country_and_global():
     assert "rsync://rsync.example/archlinux/" not in urls
 
 
+def test_candidates_skip_a_lagging_sync_generation():
+    payload = mirror_status_payload()
+    lagging = dict(payload["urls"][0])
+    lagging["url"] = "https://lag.example/archlinux/"
+    lagging["last_sync"] = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 12 * 3600)
+    )
+    payload["urls"].append(lagging)
+    now = time.time()
+    candidates = build_candidates(
+        parse_status_payload(payload),
+        target_country="UA",
+        config=Config(),
+        now=now,
+    )
+    assert "lag.example" not in {mirror.host for mirror in candidates}
+    relaxed = build_candidates(
+        parse_status_payload(payload),
+        target_country="UA",
+        config=Config(mirror_max_sync_skew_hours=24.0),
+        now=now,
+    )
+    assert "lag.example" in {mirror.host for mirror in relaxed}
+
+
 def test_select_results_orders_by_latency_and_dedupes_hosts():
     parsed = snapshot().mirrors
     results = [

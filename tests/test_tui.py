@@ -203,6 +203,42 @@ def test_mirror_table_keeps_http_and_https_rows_for_one_host(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_mirror_info_reports_stale_sync_databases(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            app._render_mirror_info(
+                {
+                    "last_mirror_country": "CH",
+                    "last_mirror_source": "vpn-exit",
+                    "pacman_db": {
+                        "available": True,
+                        "stale": True,
+                        "reasons": ["too-old"],
+                        "oldest_age_hours": 125.0,
+                        "skew_hours": 0.5,
+                        "databases": [
+                            {
+                                "name": "extra",
+                                "modified_at": 1.0,
+                                "age_hours": 125.0,
+                            }
+                        ],
+                    },
+                }
+            )
+            await pilot.pause()
+            rendered = str(app.query_one("#mirror-info", Static).render())
+            assert "extra.db" in rendered
+            assert "pacman -Syu" in rendered
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
 def test_gui_conflict_modal_can_be_cancelled(monkeypatch):
     seed_servers()
     monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})

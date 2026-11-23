@@ -4,6 +4,7 @@ import time
 
 from pno.config import Config
 from pno.mirrors.models import ProbeResult
+from pno.mirrors.pacman_db import PacmanDbReport, SyncDatabase
 from pno.mirrors.planner import select_results
 from pno.mirrors.service import refresh_mirrors, resolve_target
 from pno.mirrors.status import parse_status_payload
@@ -74,6 +75,55 @@ def test_refresh_can_override_the_country(tmp_path):
     )
     assert result["target_country"] == "DE"
     assert result["target_source"] == "manual"
+
+
+def sync_db_report(*, stale: bool) -> PacmanDbReport:
+    now = time.time()
+    database = SyncDatabase(
+        name="extra",
+        path="/var/lib/pacman/sync/extra.db",
+        modified_at=now - 120 * 3600,
+        age_hours=120.0,
+    )
+    return PacmanDbReport(
+        available=True,
+        checked_at=now,
+        databases=(database,),
+        oldest_age_hours=120.0,
+        skew_hours=0.0,
+        stale=stale,
+        reasons=("too-old",) if stale else (),
+    )
+
+
+def test_refresh_warns_about_stale_pacman_databases(tmp_path):
+    state = StateStore(tmp_path / "state.json")
+    result = refresh_mirrors(
+        Config(mirror_count=3),
+        state,
+        apply=False,
+        status_fetcher=lambda: parse_status_payload(mirror_status_payload()),
+        probe=fake_probe,
+        sync_db_reader=lambda **kwargs: sync_db_report(stale=True),
+    )
+    assert result["pacman_db"]["stale"] is True
+    assert result["pacman_db"]["databases"][0]["name"] == "extra"
+    assert [warning["code"] for warning in result["warnings"]] == ["pacman-db-stale"]
+    assert "pacman -Syu" in result["warnings"][0]["hint"]
+
+
+def test_refresh_stays_quiet_when_pacman_databases_are_fresh(tmp_path):
+    state = StateStore(tmp_path / "state.json")
+    result = refresh_mirrors(
+        Config(mirror_count=3),
+        state,
+        apply=False,
+        status_fetcher=lambda: parse_status_payload(mirror_status_payload()),
+        probe=fake_probe,
+        sync_db_reader=lambda **kwargs: sync_db_report(stale=False),
+    )
+    assert result["pacman_db"]["stale"] is False
+    assert result["warnings"] == []
 
 
 def test_https_is_preferred_for_the_same_host():

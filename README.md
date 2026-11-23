@@ -206,7 +206,10 @@ eligible routes for that country.
 1. Download `https://archlinux.org/mirrors/status/json/` (cached for an hour).
 2. Keep `active` http/https mirrors with `completion_pct >= 0.95`, recent
    `last_sync`, and `delay <= 24h`. `rsync://` entries are never written:
-   pacman cannot use them.
+   pacman cannot use them. Among the eligible mirrors, drop those whose
+   `last_sync` trails the freshest candidate by more than
+   `mirror_max_sync_skew_hours`, so a mirror that is mid-sync cannot enter the
+   list.
 3. Candidate pool = mirrors in the target country + the globally best mirrors
    by Arch score.
 4. Probe each candidate for real: a `Range` request for `core.db` from the
@@ -218,6 +221,13 @@ eligible routes for that country.
 The target country is the current VPN **exit** country. When disconnected, it
 is `home_country` (default `UA`). Proton uses `UK` where Arch uses `GB`; the
 mapping lives in `pno/data/countries.toml`.
+
+`pno mirrors status`, `pno mirrors refresh`, `pno doctor` and the TUI also
+report the age of the local pacman sync databases (`pacman_db_max_age_hours`,
+`pacman_db_max_skew_hours`). A stale local `extra.db` makes pacman request
+package versions that the mirrors have already deleted; every mirror then
+answers 404 and the mirror set looks broken. `pno` only warns and points to
+`sudo pacman -Syu`; it never runs pacman on its own.
 
 ### Proton VPN settings
 
@@ -336,6 +346,9 @@ your favorites and settings.
 | `mirror_min_completion` | `0.95` | Arch completion threshold |
 | `mirror_max_delay_hours` | `24` | maximum Arch sync delay |
 | `mirror_max_age_hours` | `48` | maximum age of `last_sync` |
+| `mirror_max_sync_skew_hours` | `6` | drop mirrors trailing the freshest `last_sync` by more |
+| `pacman_db_max_age_hours` | `24` | warn when a local sync database is older |
+| `pacman_db_max_skew_hours` | `6` | warn when local repositories differ by more |
 | `mirror_pacman_sync` | `false` | run `pacman -Sy` after applying |
 | `mirrorlist_path` | `/etc/pacman.d/mirrorlist` | target file |
 | `language` | `"en"` | `en` or `uk`; English is the default, changed only by the user |

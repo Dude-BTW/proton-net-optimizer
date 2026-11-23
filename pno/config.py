@@ -39,7 +39,10 @@ class Config:
     mirror_probe_attempts: int = 2
     mirror_max_delay_hours: float = 24.0
     mirror_max_age_hours: float = 48.0
+    mirror_max_sync_skew_hours: float = 6.0
     mirror_min_completion: float = 0.95
+    pacman_db_max_age_hours: float = 24.0
+    pacman_db_max_skew_hours: float = 6.0
     mirror_pacman_sync: bool = False
     mirror_status_max_age: float = 3600.0
     mirrorlist_path: str = "/etc/pacman.d/mirrorlist"
@@ -72,7 +75,10 @@ class Config:
             "mirror_debounce_seconds",
             "mirror_interval_hours",
             "mirror_probe_timeout",
+            "mirror_max_sync_skew_hours",
             "mirror_status_max_age",
+            "pacman_db_max_age_hours",
+            "pacman_db_max_skew_hours",
             "proton_helper_timeout",
         ):
             value = getattr(self, name)

@@ -12,6 +12,8 @@ from pno.countries import arch_code, normalize_code
 from pno.errors import PnoError
 from pno.mirrors.apply import apply_plan, current_mirrorlist
 from pno.mirrors.models import ProbeResult
+from pno.mirrors.pacman_db import HINT as PACMAN_DB_HINT
+from pno.mirrors.pacman_db import PacmanDbReport, describe, read_sync_databases
 from pno.mirrors.planner import MirrorPlan, plan_mirrors
 from pno.mirrors.status import MirrorStatusSnapshot, load_status
 from pno.proton.serverlist import ServerCache
@@ -49,6 +51,7 @@ def refresh_mirrors(
     status_fetcher: Callable[[], MirrorStatusSnapshot] | None = None,
     probe: Callable[..., list[ProbeResult]] | None = None,
     apply_runner: Callable[..., Any] | None = None,
+    sync_db_reader: Callable[..., PacmanDbReport] | None = None,
     mirrorlist_path: Path | None = None,
     now: float | None = None,
 ) -> dict[str, Any]:
@@ -101,6 +104,35 @@ def refresh_mirrors(
 
     result["apply"] = apply_result.to_dict()
     result["status_age"] = snapshot.age(timestamp)
+
+    # Read after the apply: an explicit `mirror_pacman_sync` refreshes the
+    # databases and must not leave a stale warning behind.
+    reader = sync_db_reader or read_sync_databases
+    pacman_db = reader(
+        max_age_hours=config.pacman_db_max_age_hours,
+        max_skew_hours=config.pacman_db_max_skew_hours,
+        now=timestamp,
+    )
+    result["pacman_db"] = pacman_db.to_dict()
+    result["warnings"] = []
+    if pacman_db.stale:
+        result["warnings"].append(
+            {
+                "code": "pacman-db-stale",
+                "message": describe(pacman_db),
+                "hint": PACMAN_DB_HINT,
+            }
+        )
+        events.emit(
+            "warning",
+            "mirrors",
+            "mirrors.pacman_db.stale",
+            {
+                "reasons": list(pacman_db.reasons),
+                "oldest_age_hours": pacman_db.oldest_age_hours,
+                "skew_hours": pacman_db.skew_hours,
+            },
+        )
 
     measured = {
         "last_measure_at": timestamp,
@@ -176,4 +208,8 @@ def mirrors_overview(
         "last_mirror_apply": snapshot.get("last_mirror_apply"),
         "mirror_error": snapshot.get("mirror_error"),
         "next_mirror_due": snapshot.get("next_mirror_due"),
+        "pacman_db": read_sync_databases(
+            max_age_hours=config.pacman_db_max_age_hours,
+            max_skew_hours=config.pacman_db_max_skew_hours,
+        ).to_dict(),
     }

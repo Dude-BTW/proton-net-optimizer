@@ -17,6 +17,8 @@ from pno import paths
 from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
+from pno.mirrors.pacman_db import HINT as PACMAN_DB_HINT
+from pno.mirrors.pacman_db import describe as describe_pacman_db
 from pno.mirrors.service import mirrors_overview, refresh_mirrors
 from pno.proton.selection import (
     regular_countries,
@@ -977,6 +979,11 @@ def _cmd_mirrors(args: argparse.Namespace, config: Config) -> int:
         )
         for line in payload.get("mirrorlist_preview") or []:
             print(f"  {line}")
+        sync = payload.get("pacman_db") or {}
+        if sync:
+            print(f"Sync DBs: {describe_pacman_db(sync)}")
+            if sync.get("stale"):
+                print(f"Warning:  {PACMAN_DB_HINT}")
         if payload.get("mirror_error"):
             print(f"Error:    {payload['mirror_error']}")
         return 0
@@ -1020,6 +1027,10 @@ def _cmd_mirrors(args: argparse.Namespace, config: Config) -> int:
         print("Dry run: no file was written")
     elif apply.get("reason") == "not-requested":
         print("Measured only; no file was written")
+    for warning in result.get("warnings") or []:
+        print(f"Warning: {warning.get('message')}")
+        if warning.get("hint"):
+            print(f"         {warning['hint']}")
     return 0
 
 
