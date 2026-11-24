@@ -224,7 +224,7 @@ class Tray(QSystemTrayIcon):
             except PnoError as exc:
                 self.showMessage(
                     tr("app.title"),
-                    tr("notify.disconnect_failed", error=exc.message),
+                    tr("notify.disconnect_failed", error=exc.describe()),
                     QSystemTrayIcon.MessageIcon.Critical,
                     6000,
                 )

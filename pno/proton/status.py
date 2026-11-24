@@ -151,14 +151,7 @@ def _from_protonvpn_cli(
     raise VpnError("unexpected 'protonvpn status' output", detail=output[-500:])
 
 
-def read_vpn_status(
-    snapshot: ServerSnapshot | None = None,
-    *,
-    timeout: float = 15.0,
-    runner: Callable[[list[str]], str] | None = None,
-) -> VpnStatus:
-    """Return the current connection state, trying NM first."""
-
+def _command_runner(timeout: float) -> Callable[[list[str]], str]:
     def default_runner(args: list[str]) -> str:
         result = run(args, timeout=timeout, error_factory=VpnError)
         if not result.ok:
@@ -168,7 +161,32 @@ def read_vpn_status(
             )
         return result.stdout
 
-    active_runner = runner or default_runner
+    return default_runner
+
+
+def read_proton_vpn_status(
+    snapshot: ServerSnapshot | None = None,
+    *,
+    timeout: float = 15.0,
+    runner: Callable[[list[str]], str] | None = None,
+) -> VpnStatus:
+    """Return only Proton's own view from ``protonvpn status``.
+
+    NetworkManager is the source of truth for the tunnel itself, but Proton's
+    daemon can keep a stale logical connection after a crash or suspend. This
+    reader exposes that view so the caller can detect the disagreement.
+    """
+    return _from_protonvpn_cli(snapshot, runner or _command_runner(timeout))
+
+
+def read_vpn_status(
+    snapshot: ServerSnapshot | None = None,
+    *,
+    timeout: float = 15.0,
+    runner: Callable[[list[str]], str] | None = None,
+) -> VpnStatus:
+    """Return the current connection state, trying NM first."""
+    active_runner = runner or _command_runner(timeout)
     try:
         return _from_nmcli(snapshot, active_runner)
     except VpnError as nm_error:

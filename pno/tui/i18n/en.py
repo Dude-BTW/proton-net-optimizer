@@ -108,6 +108,9 @@ MESSAGES = {
     "settings.save": "Save",
     "settings.saved": "Settings saved",
     "notify.connected": "Connected to {server} (load {load})",
+    "notify.connected_stale": (
+        "Connected to {server} (load {load}); cleared a stale Proton state first"
+    ),
     "notify.connect_failed": "Connection failed: {error}",
     "notify.disconnected": "Disconnected",
     "notify.disconnect_failed": "Disconnect failed: {error}",

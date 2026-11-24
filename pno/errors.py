@@ -40,6 +40,20 @@ class PnoError(Exception):
             payload["hint"] = self.hint
         return payload
 
+    def describe(self, *, limit: int = 200) -> str:
+        """Return one line for notifications: the message plus its detail.
+
+        The detail carries the program output that actually explains a
+        failure (for example Proton's own error text). It is flattened and
+        truncated so a desktop notification stays readable.
+        """
+        if not self.detail:
+            return self.message
+        detail = " ".join(self.detail.split())
+        if len(detail) > limit:
+            detail = detail[: limit - 1].rstrip() + "…"
+        return f"{self.message}: {detail}"
+
 
 class ConfigError(PnoError):
     code = "config_error"

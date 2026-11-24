@@ -108,6 +108,10 @@ MESSAGES = {
     "settings.save": "Зберегти",
     "settings.saved": "Налаштування збережено",
     "notify.connected": "Підключено до {server} (навантаження {load})",
+    "notify.connected_stale": (
+        "Підключено до {server} (навантаження {load}); "
+        "попередньо очищено застарілий стан Proton"
+    ),
     "notify.connect_failed": "Помилка підключення: {error}",
     "notify.disconnected": "Відключено",
     "notify.disconnect_failed": "Не вдалося відключитися: {error}",

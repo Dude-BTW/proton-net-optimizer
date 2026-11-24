@@ -175,6 +175,19 @@ If the Proton VPN GUI is running while a VPN connection is active, connecting
 from the TUI opens a dialog. **Yes** closes the GUI, disconnects, and connects
 through pno; **No** leaves everything untouched.
 
+A crash or suspend can leave Proton's daemon holding a logical connection while
+NetworkManager has no tunnel. When NetworkManager reports no connection but
+`protonvpn status` still shows one, `pno` disconnects that stale state before
+connecting and records `vpn.stale-state.detected`, `.cleared` or `.clear-failed`
+events; the success notification says when this happened. If the stale state
+cannot be cleared, the connect attempt still runs and the warning stays in the
+log.
+
+Failed connect and disconnect attempts are written as `vpn.connect.failed` and
+`vpn.disconnect.failed` with Proton's own error text, and the CLI, TUI and tray
+show that detail instead of a generic message. Known Proton phrases (server
+unreachable, connect timeout, expired authentication) also get a hint.
+
 ## How it works
 
 ### Server loads

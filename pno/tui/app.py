@@ -2033,7 +2033,7 @@ class PnoApp(App[None]):
     @work(thread=True, exclusive=True, group="connect")
     def _connect_worker(self, name: str, close_gui: bool = False) -> None:
         try:
-            connect_server(
+            outcome = connect_server(
                 name,
                 close_gui=close_gui,
                 status_reader=self._status_reader,
@@ -2044,7 +2044,7 @@ class PnoApp(App[None]):
         except PnoError as exc:
             self.call_from_thread(
                 self.notify,
-                tr("notify.connect_failed", error=exc.message),
+                tr("notify.connect_failed", error=exc.describe()),
                 severity="error",
                 timeout=8,
             )
@@ -2057,9 +2057,10 @@ class PnoApp(App[None]):
             self.call_from_thread(self._apply_local_vpn, fresh)
         server = self.snapshot.lookup(name) if self.snapshot else None
         load_text = f"{server.load}%" if server else "?"
+        key = "notify.connected_stale" if outcome.stale_cleared else "notify.connected"
         self.call_from_thread(
             self.notify,
-            tr("notify.connected", server=name, load=load_text),
+            tr(key, server=name, load=load_text),
             severity="information",
         )
         self.call_from_thread(self._remote_status_worker)
@@ -2074,7 +2075,7 @@ class PnoApp(App[None]):
         except PnoError as exc:
             self.call_from_thread(
                 self.notify,
-                tr("notify.disconnect_failed", error=exc.message),
+                tr("notify.disconnect_failed", error=exc.describe()),
                 severity="error",
                 timeout=8,
             )

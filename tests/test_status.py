@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pno.proton.serverlist import snapshot_from_payload
-from pno.proton.status import VpnStatus, read_vpn_status
+from pno.proton.status import VpnStatus, read_proton_vpn_status, read_vpn_status
 from tests.fixtures import helper_payload, server
 
 
@@ -56,6 +56,26 @@ def test_fallback_disconnected():
         return "Status: Disconnected\n"
 
     status = read_vpn_status(snap(), runner=runner)
+    assert status.connected is False
+    assert status.source == "protonvpn-cli"
+
+
+def test_proton_status_reader_skips_networkmanager():
+    calls = []
+
+    def runner(args):
+        calls.append(args[0])
+        return "Status: Connected\nServer: SE#56 in Sweden\nLoad: 28%\n"
+
+    status = read_proton_vpn_status(runner=runner)
+    assert calls == ["protonvpn"]
+    assert status.connected is True
+    assert status.server_name == "SE#56"
+    assert status.source == "protonvpn-cli"
+
+
+def test_proton_status_reader_reports_disconnected():
+    status = read_proton_vpn_status(runner=lambda args: "Status: Disconnected\n")
     assert status.connected is False
     assert status.source == "protonvpn-cli"
 
