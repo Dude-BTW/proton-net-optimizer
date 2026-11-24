@@ -5,6 +5,7 @@ import time
 
 from pno.config import Config
 from pno.daemon import Daemon
+from pno.proton.killswitch import CleanupResult, KillSwitchReport
 from pno.proton.serverlist import snapshot_from_payload
 from pno.proton.status import VpnStatus
 from pno.state import StateStore
@@ -20,15 +21,26 @@ class FakeCache:
         return SERVERS
 
 
-def make_daemon(tmp_path, *, vpn=None):
+def make_daemon(tmp_path, *, vpn=None, config=None, killswitch_cleaner=None):
     state = StateStore(tmp_path / "state.json")
     return Daemon(
-        Config(),
+        config or Config(),
         state=state,
         server_cache=FakeCache(),
         vpn_reader=lambda snapshot: vpn
         or VpnStatus(connected=False, source="test", checked_at=time.time()),
+        killswitch_cleaner=killswitch_cleaner or _no_killswitch_cleanup,
         socket_path=tmp_path / "run.sock",
+    )
+
+
+def _no_killswitch_cleanup(*, force: bool = False) -> CleanupResult:
+    return CleanupResult(
+        changed=False,
+        dry_run=False,
+        removed=(),
+        reason="nothing-to-do",
+        report=KillSwitchReport(vpn_connected=False, setting="off"),
     )
 
 
@@ -79,6 +91,120 @@ def test_refresh_servers_updates_state(tmp_path):
         return server_obj
 
     assert asyncio.run(scenario())["count"] == 1
+
+
+def test_stale_killswitch_is_cleaned_only_after_delay(tmp_path):
+    calls: list[bool] = []
+
+    def cleaner(*, force: bool = False) -> CleanupResult:
+        calls.append(force)
+        return CleanupResult(
+            changed=True,
+            dry_run=False,
+            removed=("pvpn-killswitch-ipv6",),
+            reason="cleaned",
+            report=KillSwitchReport(vpn_connected=False, setting="off"),
+        )
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(killswitch_cleanup_delay=10.0),
+        killswitch_cleaner=cleaner,
+    )
+    status = VpnStatus(connected=False, source="test", checked_at=1.0)
+
+    async def scenario():
+        await daemon._maybe_clean_stale_killswitch(status, now=100.0)
+        assert calls == []
+        await daemon._maybe_clean_stale_killswitch(status, now=109.9)
+        assert calls == []
+        await daemon._maybe_clean_stale_killswitch(status, now=110.0)
+        assert calls == [False]
+
+    asyncio.run(scenario())
+    state = daemon.state.read()
+    assert state["killswitch_removed"] == ["pvpn-killswitch-ipv6"]
+    assert state["killswitch_last_error"] is None
+
+
+def test_reconnect_resets_the_killswitch_delay(tmp_path):
+    calls: list[bool] = []
+
+    def cleaner(*, force: bool = False) -> CleanupResult:
+        calls.append(force)
+        return _no_killswitch_cleanup(force=force)
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(killswitch_cleanup_delay=10.0),
+        killswitch_cleaner=cleaner,
+    )
+    disconnected = VpnStatus(connected=False, source="test", checked_at=1.0)
+    connected = VpnStatus(
+        connected=True,
+        server_name="CH#1",
+        source="test",
+        checked_at=2.0,
+    )
+
+    async def scenario():
+        await daemon._maybe_clean_stale_killswitch(disconnected, now=0.0)
+        await daemon._maybe_clean_stale_killswitch(connected, now=5.0)
+        await daemon._maybe_clean_stale_killswitch(disconnected, now=6.0)
+        await daemon._maybe_clean_stale_killswitch(disconnected, now=15.0)
+        assert calls == []
+        await daemon._maybe_clean_stale_killswitch(disconnected, now=16.0)
+        assert calls == [False]
+
+    asyncio.run(scenario())
+
+
+def test_killswitch_cleanup_respects_pause(tmp_path):
+    calls: list[bool] = []
+
+    def cleaner(*, force: bool = False) -> CleanupResult:
+        calls.append(force)
+        return _no_killswitch_cleanup(force=force)
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(killswitch_cleanup_delay=10.0),
+        killswitch_cleaner=cleaner,
+    )
+    daemon.state.set(paused=True)
+    status = VpnStatus(connected=False, source="test", checked_at=1.0)
+
+    async def scenario():
+        for now in (0.0, 10.0, 100.0, 1000.0):
+            await daemon._maybe_clean_stale_killswitch(status, now=now)
+        assert calls == []
+
+    asyncio.run(scenario())
+
+
+def test_killswitch_cleanup_can_be_disabled(tmp_path):
+    calls: list[bool] = []
+
+    def cleaner(*, force: bool = False) -> CleanupResult:
+        calls.append(force)
+        return _no_killswitch_cleanup(force=force)
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(
+            auto_clean_stale_killswitch=False,
+            killswitch_cleanup_delay=10.0,
+        ),
+        killswitch_cleaner=cleaner,
+    )
+    status = VpnStatus(connected=False, source="test", checked_at=1.0)
+
+    async def scenario():
+        for now in (0.0, 10.0, 100.0, 1000.0):
+            await daemon._maybe_clean_stale_killswitch(status, now=now)
+        assert calls == []
+
+    asyncio.run(scenario())
 
 
 def test_vpn_change_schedules_only_when_exit_changes(tmp_path):

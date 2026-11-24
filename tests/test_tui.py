@@ -18,6 +18,7 @@ from textual.widgets import (
 
 from pno import favorites as favorites_module
 from pno import paths
+from pno.proton.killswitch import ConnectionInfo, KillSwitchReport
 from pno.proton.serverlist import snapshot_from_payload
 from pno.tui import app as tui_app
 from pno.tui.i18n import set_language, tr
@@ -38,6 +39,9 @@ class _TestApp(tui_app.PnoApp):
         return None
 
     def _proton_info_worker(self) -> None:  # type: ignore[override]
+        return None
+
+    def _killswitch_check_worker(self) -> None:  # type: ignore[override]
         return None
 
 
@@ -533,6 +537,7 @@ def test_tui_proton_tab_loads_proton_settings(monkeypatch):
             assert app.query_one("#proton-account", Static).content == tr(
                 "proton.account.none"
             )
+            assert app.query_one("#proton-killswitch-clean-btn", Button).disabled
             assert app._proton_dirty is False
         set_language("en")
 
@@ -613,6 +618,50 @@ def test_tui_proton_split_mode_loads_its_own_app_list(monkeypatch):
             await pilot.pause()
             assert apps.text == "/usr/bin/a"
             assert app._proton_dirty is False
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_proton_tab_offers_stale_killswitch_cleanup(monkeypatch):
+    seed_servers()
+    seed_proton_settings()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+    monkeypatch.setattr(tui_app, "find_gui_processes", lambda *a, **k: [])
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.query_one("#tabs", TabbedContent).active = "tab-proton"
+            await pilot.pause()
+            app._apply_killswitch_report(
+                KillSwitchReport(
+                    vpn_connected=False,
+                    setting="off",
+                    active=(
+                        ConnectionInfo(
+                            name="pvpn-killswitch-ipv6",
+                            connection_type="dummy",
+                            device="ipv6leakintrf0",
+                            state="activated",
+                        ),
+                    ),
+                    transient=(
+                        ConnectionInfo(
+                            name="pvpn-killswitch-ipv6",
+                            connection_type="dummy",
+                            device="ipv6leakintrf0",
+                            state="activated",
+                        ),
+                    ),
+                )
+            )
+            await pilot.pause()
+            label = app.query_one("#proton-killswitch-stale", Static)
+            button = app.query_one("#proton-killswitch-clean-btn", Button)
+            assert "pvpn-killswitch-ipv6" in str(label.content)
+            assert button.disabled is False
         set_language("en")
 
     asyncio.run(scenario())

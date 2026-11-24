@@ -202,6 +202,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="validate without writing anything"
     )
 
+    vpn_killswitch = vpn_sub.add_parser(
+        "killswitch", help="inspect or remove leftover kill-switch connections"
+    )
+    _add_json_flag(vpn_killswitch)
+    killswitch_sub = vpn_killswitch.add_subparsers(
+        dest="killswitch_command", required=True
+    )
+    killswitch_status = killswitch_sub.add_parser(
+        "status", help="show active kill-switch connections"
+    )
+    _add_json_flag(killswitch_status)
+    killswitch_clean = killswitch_sub.add_parser(
+        "clean", help="remove stale temporary kill-switch connections"
+    )
+    _add_json_flag(killswitch_clean)
+    killswitch_clean.add_argument(
+        "--force",
+        action="store_true",
+        help="also remove transient profiles while the kill switch setting is on",
+    )
+    killswitch_clean.add_argument(
+        "--dry-run", action="store_true", help="show what would be removed"
+    )
+
     tui = sub.add_parser("tui", help="open the Textual interface")
     _add_json_flag(tui)
 
@@ -741,7 +765,78 @@ def _cmd_vpn(args: argparse.Namespace, config: Config) -> int:
         return _cmd_vpn_settings(args, config)
     if sub == "set":
         return _cmd_vpn_set(args, config)
+    if sub == "killswitch":
+        return _cmd_vpn_killswitch(args)
     raise PnoError("unknown vpn command", detail=sub)
+
+
+_KILLSWITCH_REASONS = {
+    "vpn-connected": "the VPN is connected",
+    "killswitch-enabled": (
+        "the kill switch setting is on; leftover transient profiles are not "
+        "removed without --force"
+    ),
+    "killswitch-unknown": (
+        "the kill switch setting is unknown; leftover transient profiles are "
+        "not removed without --force"
+    ),
+    "nothing-to-do": "there are no temporary kill-switch connections",
+    "cleaned": "removed",
+    "dry-run": "dry run",
+}
+
+
+def _cmd_vpn_killswitch(args: argparse.Namespace) -> int:
+    from pno.proton.killswitch import cleanup_stale_killswitch, inspect_killswitch
+
+    sub = args.killswitch_command
+    if sub == "status":
+        report = inspect_killswitch()
+        payload = {"ok": True, **report.to_dict()}
+        if args.json:
+            _print(payload, True)
+            return 0
+        print(f"VPN:        {'connected' if report.vpn_connected else 'disconnected'}")
+        print(f"Kill switch: {report.setting}")
+        if report.active:
+            print("Active kill-switch connections:")
+            for item in report.active:
+                print(
+                    f"  {item.name} ({item.connection_type or '?'}, "
+                    f"{item.device or '-'}, {item.state or '?'})"
+                )
+        else:
+            print("Active kill-switch connections: none")
+        if report.transient:
+            print(f"Temporary:  {', '.join(item.name for item in report.transient)}")
+        if report.permanent:
+            print(f"Permanent:  {', '.join(item.name for item in report.permanent)}")
+        print(f"Stale:      {'yes' if report.stale else 'no'}")
+        if report.settings_error:
+            print(f"warning: {report.settings_error}")
+        return 0
+
+    if sub == "clean":
+        result = cleanup_stale_killswitch(
+            force=bool(args.force),
+            dry_run=bool(args.dry_run),
+        )
+        if args.json:
+            _print(result.to_dict(), True)
+            return 0
+        if result.dry_run and result.changed:
+            names = ", ".join(item.name for item in result.report.transient)
+            print(f"Would remove: {names}")
+            return 0
+        if result.removed:
+            print(f"Removed: {', '.join(result.removed)}")
+            return 0
+        print(
+            f"Nothing removed: {_KILLSWITCH_REASONS.get(result.reason, result.reason)}"
+        )
+        return 0
+
+    raise PnoError("unknown vpn killswitch command", detail=sub)
 
 
 def _cmd_vpn_settings(args: argparse.Namespace, config: Config) -> int:

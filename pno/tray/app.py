@@ -25,6 +25,7 @@ from pno.config import Config
 from pno.errors import PnoError
 from pno.ipc import request
 from pno.proton.connection import GuiActiveError, disconnect_server
+from pno.proton.killswitch import cleanup_stale_killswitch
 from pno.requirements import check_requirements
 from pno.state import StateStore
 from pno.tui.i18n import set_language, tr
@@ -86,6 +87,10 @@ class Tray(QSystemTrayIcon):
         self.disconnect_action.triggered.connect(self._disconnect)
         self.disconnect_action.setEnabled(False)
         self.menu.addAction(self.disconnect_action)
+
+        self.killswitch_action = QAction(tr("proton.killswitch.clean"), self.menu)
+        self.killswitch_action.triggered.connect(self._clean_killswitch)
+        self.menu.addAction(self.killswitch_action)
 
         self.pause_action = QAction(tr("button.pause"), self.menu)
         self.pause_action.setCheckable(True)
@@ -230,6 +235,31 @@ class Tray(QSystemTrayIcon):
                     QSystemTrayIcon.MessageIcon.Information,
                     4000,
                 )
+            self._probe()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _clean_killswitch(self) -> None:
+        def worker() -> None:
+            try:
+                result = cleanup_stale_killswitch(force=False)
+            except PnoError as exc:
+                message = tr("proton.killswitch.clean_failed", error=exc.message)
+                icon = QSystemTrayIcon.MessageIcon.Critical
+            else:
+                if result.removed:
+                    message = tr(
+                        "proton.killswitch.clean_done",
+                        connections=", ".join(result.removed),
+                    )
+                    icon = QSystemTrayIcon.MessageIcon.Information
+                elif result.reason in {"killswitch-enabled", "killswitch-unknown"}:
+                    message = tr("proton.killswitch.clean_disabled")
+                    icon = QSystemTrayIcon.MessageIcon.Warning
+                else:
+                    message = tr("proton.killswitch.clean_none")
+                    icon = QSystemTrayIcon.MessageIcon.Information
+            self.showMessage(tr("app.title"), message, icon, 6000)
             self._probe()
 
         threading.Thread(target=worker, daemon=True).start()

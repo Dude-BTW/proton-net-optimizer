@@ -85,6 +85,10 @@ class VpnError(PnoError):
     code = "vpn_error"
 
 
+class KillSwitchError(PnoError):
+    code = "killswitch_error"
+
+
 class ProtocolError(PnoError):
     code = "protocol_error"
 

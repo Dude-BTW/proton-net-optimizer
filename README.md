@@ -92,6 +92,8 @@ pno vpn settings                 # show the settings Proton itself uses
 pno vpn set netshield malware-ads-trackers
 pno vpn set kill-switch standard
 pno vpn set protocol smart       # or wireguard, openvpn-udp, ...
+pno vpn killswitch status        # show leftover kill-switch connections
+pno vpn killswitch clean         # remove them when no VPN is connected
 pno vpn set split-tunneling on --mode exclude --app /usr/bin/zoom
 pno vpn set custom-dns on --dns 1.1.1.1,9.9.9.9
 pno connect CH-US#3              # explicitly connect (you decide)
@@ -119,7 +121,7 @@ Every command that returns structured data also accepts `--json`.
 | Favorites | Personal regular countries and Secure Core routes; visual checklist on the left, validated text editor on the right |
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
 | Logs | Tail of the JSONL event stream plus editable retention limits |
-| Proton VPN | Account, NetShield, kill switch, port forwarding, split tunneling, protocol, VPN Accelerator, Moderate NAT, IPv6, custom DNS, telemetry, crash reports; GUI-only preferences are shown read-only |
+| Proton VPN | Account, NetShield, kill switch, port forwarding, split tunneling, protocol, VPN Accelerator, Moderate NAT, IPv6, custom DNS, telemetry, crash reports; a warning and cleanup button appear when a temporary kill-switch connection is left behind; GUI-only preferences are shown read-only |
 | Application | Top-N, home country, terminal, language (EN/UK) |
 
 Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
@@ -270,11 +272,38 @@ capture remain GUI-only. Auto-connect, start-minimized and pinned tray
 connections are shown read-only: `pno` never connects without an explicit
 action.
 
+### Leftover kill switch after sleep
+
+Independently of the kill switch setting, Proton creates a temporary
+`pvpn-killswitch-ipv6` NetworkManager profile while the VPN is connected to
+prevent IPv6 leaks. A normal disconnect removes it, but suspend/resume or a
+crash can leave it active with no VPN, so the dummy route blocks traffic. The
+standard/advanced kill switch uses the same temporary `pvpn-killswitch` profile
+and permanent `*-perm` profiles.
+
+`pno` removes only the temporary profiles, and only while the VPN is
+disconnected:
+
+```bash
+pno vpn killswitch status        # what is active and whether it is stale
+pno vpn killswitch clean         # remove temporary leftover profiles
+pno vpn killswitch clean --dry-run
+pno vpn killswitch clean --force # also when the setting is standard/advanced
+```
+
+The daemon does this automatically after `killswitch_cleanup_delay` seconds of
+a stable disconnected state when the kill switch setting is `off` and the
+daemon is not paused. It never touches `*-perm` profiles, the Proton settings
+file, or an active VPN. The TUI **Proton VPN** tab and the tray menu expose the
+same cleanup as a button.
+
 ### Daemon
 
 A systemd user service (`pno-daemon.service`):
 
 - polls NetworkManager every 10 s for `ProtonVPN <server>` connection names;
+- removes leftover temporary kill-switch profiles after the VPN has stayed
+  disconnected for `killswitch_cleanup_delay` seconds;
 - refreshes loads every 60 s while running;
 - after an exit-country change (15 s debounce) and every ~12 h ±10% jitter,
   measures and applies a new mirrorlist;
@@ -334,6 +363,8 @@ your favorites and settings.
 | `home_country` | `"UA"` | mirror target when the VPN is off |
 | `poll_interval` | `10` | VPN state poll, seconds |
 | `loads_interval` | `60` | load refresh interval, seconds |
+| `auto_clean_stale_killswitch` | `true` | remove transient kill-switch profiles after a VPN drop |
+| `killswitch_cleanup_delay` | `10` | seconds disconnected before the daemon removes them |
 | `servers_max_age` | `120` | reuse cached loads younger than this |
 | `auto_mirror` | `true` | enable scheduled/triggered mirror refresh |
 | `auto_mirror_on_vpn_change` | `true` | refresh after the exit country changes |
@@ -471,6 +502,9 @@ combination unambiguous.
 - Proton VPN settings written by `pno` apply on the next connection; `pno`
   never reconnects. Advanced kill switch, troubleshooting packet capture and
   auto-connect stay in the Proton VPN GUI.
+- Stale kill-switch cleanup targets Proton's NetworkManager dummy profiles.
+  The experimental nftables firewall kill-switch backend uses no such profiles
+  and is left to Proton.
 - Split tunneling is a Proton GUI feature; `pno` writes the same JSON keys, but
   Proton may change or reset that format between releases. It works only while
   the kill switch is off and requires a paid plan.

@@ -86,6 +86,25 @@ def test_language_change_is_persisted(tmp_path):
     assert config_module.load(path).language == "uk"
 
 
+def test_killswitch_cleanup_defaults_and_validation():
+    config = Config().validate()
+    assert config.auto_clean_stale_killswitch is True
+    assert config.killswitch_cleanup_delay == 10.0
+    with pytest.raises(ConfigError):
+        Config(killswitch_cleanup_delay=0).validate()
+
+
+def test_killswitch_cleanup_can_be_disabled(tmp_path):
+    path = tmp_path / "config.toml"
+    config_module.save(
+        Config(auto_clean_stale_killswitch=False, killswitch_cleanup_delay=30),
+        path,
+    )
+    loaded = config_module.load(path)
+    assert loaded.auto_clean_stale_killswitch is False
+    assert loaded.killswitch_cleanup_delay == 30.0
+
+
 def test_log_defaults():
     config = Config().validate()
     assert config.log_max_bytes == 20 * 1024 * 1024

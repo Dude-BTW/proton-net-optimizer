@@ -21,6 +21,7 @@ from pno import events, ipc, paths
 from pno.config import Config
 from pno.errors import PnoError
 from pno.mirrors.service import refresh_mirrors
+from pno.proton.killswitch import CleanupResult, cleanup_stale_killswitch
 from pno.proton.models import ServerSnapshot
 from pno.proton.serverlist import ServerCache
 from pno.proton.status import VpnStatus, read_vpn_status
@@ -41,6 +42,7 @@ class Daemon:
         server_cache: ServerCache | None = None,
         vpn_reader: Callable[[ServerSnapshot | None], VpnStatus] = read_vpn_status,
         mirror_refresher: Callable[..., dict[str, Any]] = refresh_mirrors,
+        killswitch_cleaner: Callable[..., CleanupResult] = cleanup_stale_killswitch,
         socket_path: Path | None = None,
     ) -> None:
         self.config = config
@@ -50,6 +52,7 @@ class Daemon:
         )
         self.vpn_reader = vpn_reader
         self.mirror_refresher = mirror_refresher
+        self.killswitch_cleaner = killswitch_cleaner
         self.socket_path = socket_path or paths.socket_path()
 
         self.servers: ServerSnapshot | None = None
@@ -61,6 +64,8 @@ class Daemon:
         self._servers_lock = asyncio.Lock()
         self._mirror_lock = asyncio.Lock()
         self._pending_mirror: asyncio.Task[Any] | None = None
+        self._disconnected_since: float | None = None
+        self._next_killswitch_attempt = 0.0
 
     # ------------------------------------------------------------------ state
     @property
@@ -293,7 +298,74 @@ class Daemon:
                         },
                     )
                     self._maybe_trigger_on_vpn_change(previous, status)
+                await self._maybe_clean_stale_killswitch(status)
             await self._sleep(self.config.poll_interval)
+
+    async def _maybe_clean_stale_killswitch(
+        self,
+        status: VpnStatus,
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Remove leftover transient kill-switch profiles after a VPN drop."""
+        moment = time.monotonic() if now is None else now
+        if status.connected:
+            self._disconnected_since = None
+            self._next_killswitch_attempt = 0.0
+            return
+        if self.paused or not self.config.auto_clean_stale_killswitch:
+            return
+        if self._disconnected_since is None:
+            self._disconnected_since = moment
+        if moment - self._disconnected_since < self.config.killswitch_cleanup_delay:
+            return
+        if moment < self._next_killswitch_attempt:
+            return
+        try:
+            result = await asyncio.to_thread(self.killswitch_cleaner, force=False)
+        except PnoError as exc:
+            self._next_killswitch_attempt = moment + 300.0
+            events.emit(
+                "warning", "vpn", "vpn.killswitch.cleanup.failed", {}, error=exc
+            )
+            error_payload = exc.to_dict()
+            self.state.update(
+                lambda current: current.update(
+                    {
+                        "killswitch_last_error": error_payload,
+                        "killswitch_last_error_at": time.time(),
+                    }
+                )
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - the daemon must stay alive
+            self._next_killswitch_attempt = moment + 300.0
+            events.emit("error", "vpn", "vpn.killswitch.cleanup.crashed", {}, error=exc)
+            return
+
+        # Do not inspect NetworkManager on every poll when there is nothing to
+        # remove; the delay after a disconnect is handled above.
+        self._next_killswitch_attempt = moment + 30.0
+        if not result.changed:
+            return
+        events.emit(
+            "info",
+            "vpn",
+            "vpn.killswitch.auto-cleaned",
+            {
+                "removed": list(result.removed),
+                "setting": result.report.setting,
+            },
+        )
+        self.state.update(
+            lambda current: current.update(
+                {
+                    "killswitch_last_cleanup_at": time.time(),
+                    "killswitch_removed": list(result.removed),
+                    "killswitch_last_error": None,
+                }
+            )
+        )
 
     def _maybe_trigger_on_vpn_change(
         self, previous: VpnStatus | None, current: VpnStatus

@@ -428,6 +428,11 @@ RequirementsScreen {
     color: $text-muted;
 }
 
+#proton-killswitch-clean-btn {
+    width: 100%;
+    margin-top: 1;
+}
+
 #proton-layout Select,
 #proton-layout Input,
 #proton-layout TextArea,

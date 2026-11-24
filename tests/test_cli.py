@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from pno.cli import build_parser
+import json
+
+from pno.cli import build_parser, main
+from pno.proton.killswitch import CleanupResult, KillSwitchReport
 
 
 def test_parser_has_the_documented_commands():
@@ -66,6 +69,66 @@ def test_daemon_subcommands():
     parser = build_parser()
     assert parser.parse_args(["daemon", "status"]).daemon_command == "status"
     assert parser.parse_args(["daemon", "pause"]).daemon_command == "pause"
+
+
+def test_vpn_killswitch_subcommands():
+    parser = build_parser()
+    status = parser.parse_args(["vpn", "killswitch", "status", "--json"])
+    assert status.vpn_command == "killswitch"
+    assert status.killswitch_command == "status"
+    assert status.json is True
+    clean = parser.parse_args(
+        ["vpn", "killswitch", "clean", "--force", "--dry-run", "--json"]
+    )
+    assert clean.killswitch_command == "clean"
+    assert clean.force is True
+    assert clean.dry_run is True
+    assert clean.json is True
+
+
+def test_vpn_killswitch_status_json(monkeypatch, capsys):
+    from pno.proton import killswitch
+
+    report = KillSwitchReport(
+        vpn_connected=False,
+        setting="off",
+        transient=(),
+        permanent=(),
+    )
+    monkeypatch.setattr(killswitch, "inspect_killswitch", lambda: report)
+    assert main(["vpn", "killswitch", "status", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["setting"] == "off"
+    assert payload["stale"] is False
+
+
+def test_vpn_killswitch_clean_json(monkeypatch, capsys):
+    from pno.proton import killswitch
+
+    report = KillSwitchReport(
+        vpn_connected=False,
+        setting="off",
+        transient=(),
+        permanent=(),
+    )
+    result = CleanupResult(
+        changed=True,
+        dry_run=False,
+        removed=("pvpn-killswitch-ipv6",),
+        reason="cleaned",
+        report=report,
+    )
+    monkeypatch.setattr(
+        killswitch,
+        "cleanup_stale_killswitch",
+        lambda **kwargs: result,
+    )
+    assert main(["vpn", "killswitch", "clean", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["removed"] == ["pvpn-killswitch-ipv6"]
+    assert payload["reason"] == "cleaned"
 
 
 def test_uninstall_flags():

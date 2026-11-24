@@ -48,6 +48,12 @@ from pno.proton.connection import (
     wait_for_disconnected,
 )
 from pno.proton.gui import find_gui_processes
+from pno.proton.killswitch import (
+    CleanupResult,
+    KillSwitchReport,
+    cleanup_stale_killswitch,
+    inspect_killswitch,
+)
 from pno.proton.models import CountryServers, Server, ServerSnapshot
 from pno.proton.selection import (
     current_server_info,
@@ -142,6 +148,9 @@ class PnoApp(App[None]):
         self._proton_syncing = False
         self._proton_gui_running = False
         self._proton_gui_app = proton_settings.GuiAppSettings()
+        self._killswitch_report: KillSwitchReport | None = None
+        self._killswitch_checked_at = 0.0
+        self._killswitch_warned: frozenset[str] = frozenset()
 
         self.remote_status: dict[str, Any] | None = None
         self.mirror_result: dict[str, Any] | None = None
@@ -383,6 +392,17 @@ class PnoApp(App[None]):
                                     tr("proton.killswitch.advanced_note"),
                                     id="proton-killswitch-note",
                                     classes="proton-help",
+                                )
+                                yield Static(
+                                    "",
+                                    id="proton-killswitch-stale",
+                                    classes="proton-help",
+                                )
+                                yield Button(
+                                    tr("proton.killswitch.clean"),
+                                    id="proton-killswitch-clean-btn",
+                                    variant="warning",
+                                    disabled=True,
                                 )
                             with Vertical(classes="proton-field"):
                                 yield Checkbox(
@@ -1024,6 +1044,7 @@ class PnoApp(App[None]):
         self._proton_dirty = False
         self._render_proton_account()
         self._render_proton_gui_app()
+        self._render_killswitch_report()
         self.query_one("#proton-status", Static).update("")
         self._refresh_proton_controls()
 
@@ -1325,6 +1346,125 @@ class PnoApp(App[None]):
                 severity="warning",
                 timeout=8,
             )
+
+    def _request_killswitch_check(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._killswitch_checked_at < 15.0:
+            return
+        self._killswitch_checked_at = now
+        self._killswitch_check_worker()
+
+    @work(thread=True, exclusive=True, group="killswitch-check")
+    def _killswitch_check_worker(self) -> None:
+        try:
+            report = inspect_killswitch()
+        except PnoError as exc:
+            self.call_from_thread(self._killswitch_check_failed, exc.message)
+            return
+        self.call_from_thread(self._apply_killswitch_report, report)
+
+    def _killswitch_check_failed(self, error: str) -> None:
+        try:
+            self.query_one("#proton-killswitch-stale", Static).update(
+                tr("proton.killswitch.check_failed", error=error)
+            )
+            self.query_one("#proton-killswitch-clean-btn", Button).disabled = True
+        except Exception:  # noqa: BLE001 - widget tree may be gone
+            return
+
+    def _apply_killswitch_report(self, report: KillSwitchReport) -> None:
+        self._killswitch_report = report
+        self._render_killswitch_report()
+        names = frozenset(item.name for item in report.transient)
+        if report.stale and names != self._killswitch_warned:
+            self._killswitch_warned = names
+            self.notify(
+                tr(
+                    "proton.killswitch.stale_notify",
+                    connections=", ".join(sorted(names)),
+                ),
+                severity="warning",
+                timeout=10,
+            )
+        elif not report.transient:
+            self._killswitch_warned = frozenset()
+
+    def _render_killswitch_report(self) -> None:
+        try:
+            label = self.query_one("#proton-killswitch-stale", Static)
+            button = self.query_one("#proton-killswitch-clean-btn", Button)
+        except Exception:  # noqa: BLE001 - widget tree may be gone
+            return
+        button.label = tr("proton.killswitch.clean")
+        report = self._killswitch_report
+        if report is None or report.vpn_connected:
+            label.update("")
+            button.disabled = True
+            return
+        if report.stale:
+            label.update(
+                tr(
+                    "proton.killswitch.stale",
+                    connections=", ".join(item.name for item in report.transient),
+                )
+            )
+            button.disabled = False
+            return
+        if report.transient and report.setting in {"standard", "advanced"}:
+            label.update(
+                tr(
+                    "proton.killswitch.protected",
+                    connections=", ".join(item.name for item in report.transient),
+                    setting=report.setting,
+                )
+            )
+        else:
+            label.update("")
+        button.disabled = True
+
+    @on(Button.Pressed, "#proton-killswitch-clean-btn")
+    def _on_killswitch_clean(self) -> None:
+        self._killswitch_clean_worker()
+
+    @work(thread=True, exclusive=True, group="killswitch-clean")
+    def _killswitch_clean_worker(self) -> None:
+        try:
+            result = cleanup_stale_killswitch(force=False)
+        except PnoError as exc:
+            self.call_from_thread(self._killswitch_clean_failed, exc.message)
+            return
+        self.call_from_thread(self._killswitch_clean_done, result)
+
+    def _killswitch_clean_done(self, result: CleanupResult) -> None:
+        if result.removed:
+            self.notify(
+                tr(
+                    "proton.killswitch.clean_done",
+                    connections=", ".join(result.removed),
+                ),
+                severity="information",
+                timeout=6,
+            )
+        elif result.reason in {"killswitch-enabled", "killswitch-unknown"}:
+            self.notify(
+                tr("proton.killswitch.clean_disabled"),
+                severity="warning",
+                timeout=8,
+            )
+        else:
+            self.notify(
+                tr("proton.killswitch.clean_none"),
+                severity="information",
+            )
+        self._killswitch_checked_at = 0.0
+        self._request_killswitch_check(force=True)
+
+    def _killswitch_clean_failed(self, error: str) -> None:
+        self.notify(
+            tr("proton.killswitch.clean_failed", error=error),
+            severity="error",
+            timeout=8,
+        )
 
     def _revert_proton(self) -> None:
         self._load_proton_settings()
@@ -1810,6 +1950,7 @@ class PnoApp(App[None]):
         if tabs.active == "tab-proton":
             self._proton_gui_running = bool(find_gui_processes())
             self._refresh_proton_controls()
+            self._request_killswitch_check()
         self._remote_status_worker()
 
     # --------------------------------------------------------------- workers
@@ -2368,6 +2509,7 @@ class PnoApp(App[None]):
             ("proton-apply-btn", "proton.apply"),
             ("proton-revert-btn", "proton.revert"),
             ("proton-add-app-btn", "proton.split.add_running"),
+            ("proton-killswitch-clean-btn", "proton.killswitch.clean"),
         ):
             try:
                 self.query_one(f"#{widget_id}", Button).label = tr(key)
@@ -2437,6 +2579,7 @@ class PnoApp(App[None]):
             pass
         self._render_proton_account()
         self._render_proton_gui_app()
+        self._render_killswitch_report()
 
     def _retranslate(self) -> None:
         self.TITLE = tr("app.title")

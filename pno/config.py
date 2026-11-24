@@ -29,6 +29,11 @@ class Config:
     servers_max_age: float = 120.0
     mirror_debounce_seconds: float = 15.0
 
+    # Remove transient Proton kill-switch profiles left behind by a
+    # suspend/resume cycle or a crash, once the VPN has stayed disconnected.
+    auto_clean_stale_killswitch: bool = True
+    killswitch_cleanup_delay: float = 10.0
+
     # Mirror automation
     auto_mirror: bool = True
     auto_mirror_on_vpn_change: bool = True
@@ -73,6 +78,7 @@ class Config:
             "loads_interval",
             "servers_max_age",
             "mirror_debounce_seconds",
+            "killswitch_cleanup_delay",
             "mirror_interval_hours",
             "mirror_probe_timeout",
             "mirror_max_sync_skew_hours",
@@ -140,6 +146,7 @@ _TYPE_COERCE = {
     "include_tor": bool,
     "auto_mirror": bool,
     "auto_mirror_on_vpn_change": bool,
+    "auto_clean_stale_killswitch": bool,
     "mirror_pacman_sync": bool,
 }
 
