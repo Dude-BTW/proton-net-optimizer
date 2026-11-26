@@ -19,6 +19,7 @@ TAB_IDS = (
     "tab-servers",
     "tab-secure",
     "tab-favorites",
+    "tab-autoconnect",
     "tab-mirrors",
     "tab-logs",
     "tab-proton",

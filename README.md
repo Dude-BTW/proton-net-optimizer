@@ -12,6 +12,8 @@ you press Connect.
 - CLI and Textual TUI
 - Country flags, search and a "favorites only" filter in both server views
 - Personal Favorites tab with a visual checklist and a validated text editor
+- Opt-in startup auto-connect to one regular country (least-loaded server) or
+  one exact Secure Core route, in a bounded window once per boot
 - A Proton VPN tab that edits the settings the GUI writes (account, NetShield,
   kill switch, port forwarding, split tunneling, protocol, DNS, telemetry)
 - Secure Core: every route in the TUI, aggregates per exit country in the CLI
@@ -99,6 +101,12 @@ pno vpn set custom-dns on --dns 1.1.1.1,9.9.9.9
 pno connect CH-US#3              # explicitly connect (you decide)
 pno connect CH-US#3 --close-gui  # close a running Proton GUI, then connect
 pno disconnect                   # disconnect now
+pno autoconnect set UA           # least-loaded regular server at startup
+pno autoconnect set CH-US#3      # exact Secure Core route at startup
+pno autoconnect enable|disable
+pno autoconnect status           # setting and last attempt
+pno autoconnect once             # connect to the target now
+pno autoconnect clear            # remove the target
 pno mirrors status               # current target country and mirrorlist
 pno mirrors preview              # measure, show diff, write nothing
 pno mirrors refresh              # measure and apply
@@ -119,6 +127,7 @@ Every command that returns structured data also accepts `--json`.
 | Servers | All countries (best load first) and the top-N least-loaded servers in each, with flags, search and a favorites filter |
 | Secure Core | All Secure Core routes with entry/exit flags, load, score, city and a favorites marker; search and favorites filter |
 | Favorites | Personal regular countries and Secure Core routes; visual checklist on the left, validated text editor on the right |
+| Auto connect | One regular country or one exact Secure Core route with the same two synchronized editors, plus **Connect now**; saved settings apply on the next boot |
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
 | Logs | Tail of the JSONL event stream plus editable retention limits |
 | Proton VPN | Account, NetShield, kill switch, port forwarding, split tunneling, protocol, VPN Accelerator, Moderate NAT, IPv6, custom DNS, telemetry, crash reports; a warning and cleanup button appear when a temporary kill-switch connection is left behind; GUI-only preferences are shown read-only |
@@ -240,6 +249,37 @@ entry Switzerland, exit United States. The TUI lists all available routes
 the aggregate per exit country: the percentage is the lowest load among
 eligible routes for that country.
 
+### Startup auto-connect
+
+Disabled by default and limited to one explicit target. Choose a regular
+country or an exact Secure Core route in the **Auto connect** tab (the visual
+list accepts one entry; the text editor accepts one non-empty line) or with
+`pno autoconnect set`. Saving the tab does not connect.
+
+When enabled, the daemon makes one auto-connect run per boot after login and
+after `network-online.target` (install the user service with `pno install`):
+
+- a country target resolves to the least-loaded eligible regular server of
+  that country from the current snapshot;
+- a Secure Core target must match the exact route and be eligible for the
+  account tier;
+- stale loads are logged as `autoconnect.stale-data`, then used; missing data
+  skips the attempt;
+- retries use backoff for at most two minutes, then the daemon gives up until
+  the next boot or an explicit `pno autoconnect once`;
+- the attempt is skipped when the VPN is already connected, when the Proton
+  VPN GUI is running (pno never closes it here), when the target is missing
+  from the data, or when server data is unavailable;
+- `pno daemon pause` suppresses it;
+- a manual Disconnect is never undone: the boot id of the explicit disconnect
+  is stored in `state.json`, so neither the retry loop nor a daemon restart in
+  the same boot reconnects.
+
+`pno autoconnect once`, **Connect now** in the TUI and **Connect now** in the
+tray are explicit actions. They use the same target and safety checks but skip
+the boot guard. Every attempt is logged as `autoconnect.*` plus the normal
+`vpn.connect.*` and `vpn.command` events.
+
 ### Mirrors
 
 1. Download `https://archlinux.org/mirrors/status/json/` (cached for an hour).
@@ -305,9 +345,10 @@ Rules that mirror Proton's own GUI:
 Changes apply on the next connection; `pno` never reconnects on its own.
 Kill switch changes go through `protonvpn config set` so the firewall state is
 applied immediately. Advanced kill switch and the troubleshooting packet
-capture remain GUI-only. Auto-connect, start-minimized and pinned tray
-connections are shown read-only: `pno` never connects without an explicit
-action.
+capture remain GUI-only. The Proton GUI's own auto-connect, start-minimized and
+pinned tray connections are shown read-only. pno has a separate, explicit
+startup auto-connect described below; it is the only case where pno connects
+without a click.
 
 ### Leftover kill switch after sleep
 
@@ -400,6 +441,8 @@ your favorites and settings.
 | `top_n` | `10` | servers shown per country |
 | `include_tor` | `false` | include Tor-only servers in suggestions |
 | `best_from_favorites` | `false` | choose the “best regular / Secure Core” alternative from favorites only |
+| `autoconnect_enabled` | `false` | connect automatically once per boot after login |
+| `autoconnect_target` | `""` | one country code (`UA`) or exact Secure Core route (`CH-US#3`) |
 | `home_country` | `"UA"` | mirror target when the VPN is off |
 | `poll_interval` | `10` | VPN state poll, seconds |
 | `loads_interval` | `60` | load refresh interval, seconds |

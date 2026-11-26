@@ -29,7 +29,7 @@ from typing import Callable, Iterator, Sequence
 
 from pno import events
 from pno.errors import PnoError, VpnBusyError, VpnError
-from pno.proc import CommandResult, run
+from pno.proc import CommandResult, read_boot_id, run
 from pno.proton.gui import GuiCloseResult, GuiProcess, close_gui, find_gui_processes
 from pno.proton.status import (
     VpnStatus,
@@ -228,6 +228,25 @@ def vpn_action_lock() -> Iterator[None]:
                 except OSError:
                     pass
             os.close(descriptor)
+
+
+def _mark_manual_disconnect() -> None:
+    """Remember that the user disconnected during this boot.
+
+    The daemon reads this marker so a startup auto-connect or a daemon restart
+    never undoes an explicit Disconnect in the same boot.
+    """
+    from pno import paths
+    from pno.state import StateStore
+
+    StateStore(paths.state_file()).update(
+        lambda current: current.update(
+            {
+                "manual_disconnect_boot_id": read_boot_id(),
+                "manual_disconnect_at": time.time(),
+            }
+        )
+    )
 
 
 def wait_for_connected(
@@ -549,6 +568,7 @@ def _disconnect(
     result = _run_proton(["protonvpn", "disconnect"], runner, timeout=60)
     if result.returncode == 0:
         events.emit("info", "vpn", "vpn.disconnect.done", {"gui_closed": False})
+        _mark_manual_disconnect()
         return VpnActionResult(
             ok=True,
             action="disconnect",
@@ -569,6 +589,7 @@ def _disconnect(
             "vpn.disconnect.done",
             {"gui_closed": False, "recovered": True},
         )
+        _mark_manual_disconnect()
         return VpnActionResult(
             ok=True,
             action="disconnect",
@@ -619,6 +640,7 @@ def _disconnect(
         "vpn.disconnect.done",
         {"gui_closed": True, "forced": bool(closing.forced), "recovered": recovered},
     )
+    _mark_manual_disconnect()
     return VpnActionResult(
         ok=True,
         action="disconnect",

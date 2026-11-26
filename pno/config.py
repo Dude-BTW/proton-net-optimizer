@@ -7,6 +7,7 @@ an older build never refuses to start because a newer one added a key.
 from __future__ import annotations
 
 import dataclasses
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,9 @@ from typing import Any
 
 from pno import paths
 from pno.errors import ConfigError
+
+_AUTOCONNECT_COUNTRY = re.compile(r"^[A-Z]{2}$")
+_AUTOCONNECT_SECURE_CORE = re.compile(r"^[A-Z]{2}-[A-Z]{2}#\d+$")
 
 
 @dataclass
@@ -26,6 +30,11 @@ class Config:
     # user's favorites only. The local "best in country" comparison is
     # unaffected.
     best_from_favorites: bool = False
+
+    # Startup auto-connect: one attempt per boot to a single country code or
+    # exact Secure Core route. Empty means no target.
+    autoconnect_enabled: bool = False
+    autoconnect_target: str = ""
 
     # Daemon timing (seconds)
     poll_interval: float = 10.0
@@ -118,6 +127,15 @@ class Config:
             raise ConfigError(
                 "home_country must be a two-letter code", detail=self.home_country
             )
+        self.autoconnect_target = self.autoconnect_target.strip().upper()
+        if self.autoconnect_target and not (
+            _AUTOCONNECT_COUNTRY.match(self.autoconnect_target)
+            or _AUTOCONNECT_SECURE_CORE.match(self.autoconnect_target)
+        ):
+            raise ConfigError(
+                "autoconnect_target must be a country code or Secure Core route",
+                detail=self.autoconnect_target,
+            )
         return self
 
     def to_toml(self) -> str:
@@ -149,6 +167,7 @@ _TYPE_COERCE = {
     "log_max_age_days": int,
     "include_tor": bool,
     "best_from_favorites": bool,
+    "autoconnect_enabled": bool,
     "auto_mirror": bool,
     "auto_mirror_on_vpn_change": bool,
     "auto_clean_stale_killswitch": bool,

@@ -1,8 +1,9 @@
 """Background daemon: polls VPN state, refreshes loads and mirrors.
 
-The daemon never connects or disconnects the VPN. It only observes
-NetworkManager, keeps the server cache warm, and applies mirror plans when the
-exit country changes or the schedule is due.
+The daemon observes NetworkManager, keeps the server cache warm, and applies
+mirror plans when the exit country changes or the schedule is due. The only
+connection action it performs is the opt-in startup auto-connect: one attempt
+per boot to the user's configured target, never a switch of an active tunnel.
 """
 
 from __future__ import annotations
@@ -18,9 +19,12 @@ from typing import Any, Callable
 
 from pno import config as config_module
 from pno import events, ipc, paths
+from pno.autoconnect import AutoconnectResult
+from pno.autoconnect import run_once as autoconnect_once
 from pno.config import Config
 from pno.errors import PnoError
 from pno.mirrors.service import refresh_mirrors
+from pno.proc import read_boot_id
 from pno.proton.killswitch import CleanupResult, cleanup_stale_killswitch
 from pno.proton.models import ServerSnapshot
 from pno.proton.serverlist import ServerCache
@@ -31,6 +35,7 @@ from pno.state import StateStore
 MIRROR_CHECK_INTERVAL = 60.0
 RESUME_GRACE_SECONDS = 60.0
 FAILURE_RETRY_SECONDS = 900.0
+AUTOCONNECT_RETRY_DELAYS = (5.0, 10.0, 20.0, 30.0, 30.0, 25.0)
 
 
 class Daemon:
@@ -43,6 +48,9 @@ class Daemon:
         vpn_reader: Callable[[ServerSnapshot | None], VpnStatus] = read_vpn_status,
         mirror_refresher: Callable[..., dict[str, Any]] = refresh_mirrors,
         killswitch_cleaner: Callable[..., CleanupResult] = cleanup_stale_killswitch,
+        autoconnect_runner: Callable[..., AutoconnectResult] = autoconnect_once,
+        boot_id: str | None = None,
+        autoconnect_delays: tuple[float, ...] = AUTOCONNECT_RETRY_DELAYS,
         socket_path: Path | None = None,
     ) -> None:
         self.config = config
@@ -53,6 +61,9 @@ class Daemon:
         self.vpn_reader = vpn_reader
         self.mirror_refresher = mirror_refresher
         self.killswitch_cleaner = killswitch_cleaner
+        self.autoconnect_runner = autoconnect_runner
+        self.boot_id = read_boot_id() if boot_id is None else boot_id
+        self.autoconnect_delays = autoconnect_delays
         self.socket_path = socket_path or paths.socket_path()
 
         self.servers: ServerSnapshot | None = None
@@ -111,6 +122,20 @@ class Daemon:
             },
             "paused": bool(state.get("paused")),
             "paused_at": state.get("paused_at"),
+            "autoconnect": {
+                "enabled": self.config.autoconnect_enabled,
+                "target": self.config.autoconnect_target or None,
+                "attempted_this_boot": bool(
+                    self.boot_id
+                    and state.get("autoconnect_boot_id") == self.boot_id
+                    and state.get("autoconnect_attempted_at")
+                ),
+                "attempted_at": state.get("autoconnect_attempted_at"),
+                "result": state.get("autoconnect_result"),
+                "reason": state.get("autoconnect_reason"),
+                "server": state.get("autoconnect_server"),
+                "error": state.get("autoconnect_error"),
+            },
             "vpn": self.vpn_status.to_dict() if self.vpn_status else state.get("vpn"),
             "servers": server_payload or state.get("servers"),
             "last_mirror_refresh": state.get("last_mirror_refresh"),
@@ -259,6 +284,126 @@ class Daemon:
             pass
         except Exception as exc:  # noqa: BLE001 - the daemon must stay alive
             events.emit("error", "mirrors", "mirrors.debounce.crashed", {}, error=exc)
+
+    # ------------------------------------------------------------ autoconnect
+    def _autoconnect_attempted_for_boot(self) -> bool:
+        if not self.boot_id:
+            return False
+        state = self.state.read()
+        return state.get("autoconnect_boot_id") == self.boot_id and bool(
+            state.get("autoconnect_attempted_at")
+        )
+
+    def _manual_disconnect_in_this_boot(self) -> bool:
+        if not self.boot_id:
+            return False
+        state = self.state.read()
+        return state.get("manual_disconnect_boot_id") == self.boot_id and bool(
+            state.get("manual_disconnect_at")
+        )
+
+    def _record_autoconnect(self, result: AutoconnectResult) -> None:
+        self.state.update(
+            lambda current: current.update(
+                {
+                    "autoconnect_boot_id": self.boot_id,
+                    "autoconnect_attempted_at": time.time(),
+                    "autoconnect_result": result.status,
+                    "autoconnect_reason": result.reason,
+                    "autoconnect_server": result.server,
+                    "autoconnect_error": result.error,
+                }
+            )
+        )
+
+    async def _autoconnect_loop(self) -> None:
+        """Try the configured target once per boot, with bounded retries."""
+        target = self.config.autoconnect_target or None
+        if self.paused:
+            events.emit(
+                "info",
+                "vpn",
+                "autoconnect.skipped",
+                {"trigger": "startup", "code": "paused", "target": target},
+            )
+            return
+        if not self.config.autoconnect_enabled:
+            events.emit(
+                "info",
+                "vpn",
+                "autoconnect.skipped",
+                {"trigger": "startup", "code": "disabled", "target": target},
+            )
+            return
+        if self._autoconnect_attempted_for_boot():
+            events.emit(
+                "info",
+                "vpn",
+                "autoconnect.skipped",
+                {"trigger": "startup", "code": "already-attempted", "target": target},
+            )
+            return
+        if self._manual_disconnect_in_this_boot():
+            events.emit(
+                "info",
+                "vpn",
+                "autoconnect.skipped",
+                {"trigger": "startup", "code": "manual-disconnect", "target": target},
+            )
+            return
+
+        last: AutoconnectResult | None = None
+        for delay in self.autoconnect_delays:
+            await self._sleep(delay)
+            if self.stopping.is_set():
+                return
+            if self.paused:
+                events.emit(
+                    "info",
+                    "vpn",
+                    "autoconnect.skipped",
+                    {"trigger": "startup", "code": "paused", "target": target},
+                )
+                return
+            if self._manual_disconnect_in_this_boot():
+                events.emit(
+                    "info",
+                    "vpn",
+                    "autoconnect.skipped",
+                    {
+                        "trigger": "startup",
+                        "code": "manual-disconnect",
+                        "target": target,
+                    },
+                )
+                return
+            if self.servers is None:
+                try:
+                    await self.refresh_servers(force=False)
+                except PnoError:
+                    pass
+                if self.servers is None:
+                    continue
+            last = await asyncio.to_thread(
+                self.autoconnect_runner,
+                self.config,
+                reason="startup",
+                snapshot=self.servers,
+            )
+            if last.status in {"connected", "failed"}:
+                self._record_autoconnect(last)
+            if last.status in {"connected", "skipped"}:
+                return
+        events.emit(
+            "warning",
+            "vpn",
+            "autoconnect.gave-up",
+            {
+                "target": target,
+                "reason": last.reason if last else "no-data",
+                "error": last.error if last else None,
+            },
+        )
 
     # ----------------------------------------------------------------- loops
     async def _vpn_loop(self) -> None:
@@ -552,6 +697,7 @@ class Daemon:
             asyncio.create_task(self._vpn_loop(), name="pno-vpn-loop"),
             asyncio.create_task(self._loads_loop(), name="pno-loads-loop"),
             asyncio.create_task(self._mirror_loop(), name="pno-mirror-loop"),
+            asyncio.create_task(self._autoconnect_loop(), name="pno-autoconnect"),
         ]
         try:
             await self.stopping.wait()

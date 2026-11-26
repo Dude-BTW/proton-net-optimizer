@@ -7,6 +7,7 @@ The tray is optional. When PySide6 is not installed in the project virtualenv,
 
 from __future__ import annotations
 
+import dataclasses
 import fcntl
 import sys
 import threading
@@ -21,11 +22,13 @@ except ImportError as exc:  # pragma: no cover - depends on the host
 
 from pno import config as config_module
 from pno import events, paths
+from pno.autoconnect import run_once as autoconnect_once
 from pno.config import Config
 from pno.errors import PnoError, VpnBusyError
 from pno.ipc import request
 from pno.proton.connection import GuiActiveError, disconnect_server
 from pno.proton.killswitch import cleanup_stale_killswitch
+from pno.proton.serverlist import ServerCache
 from pno.requirements import check_requirements
 from pno.state import StateStore
 from pno.tui.i18n import set_language, tr
@@ -87,6 +90,17 @@ class Tray(QSystemTrayIcon):
         self.disconnect_action.triggered.connect(self._disconnect)
         self.disconnect_action.setEnabled(False)
         self.menu.addAction(self.disconnect_action)
+
+        self.autoconnect_action = QAction(tr("tray.autoconnect"), self.menu)
+        self.autoconnect_action.setCheckable(True)
+        self.autoconnect_action.setChecked(config.autoconnect_enabled)
+        self.autoconnect_action.triggered.connect(self._toggle_autoconnect)
+        self.menu.addAction(self.autoconnect_action)
+
+        self.autoconnect_now_action = QAction(tr("autoconnect.connect_now"), self.menu)
+        self.autoconnect_now_action.triggered.connect(self._autoconnect_now)
+        self.autoconnect_now_action.setEnabled(bool(config.autoconnect_target))
+        self.menu.addAction(self.autoconnect_now_action)
 
         self.killswitch_action = QAction(tr("proton.killswitch.clean"), self.menu)
         self.killswitch_action.triggered.connect(self._clean_killswitch)
@@ -165,6 +179,11 @@ class Tray(QSystemTrayIcon):
         self.pause_action.setChecked(paused)
         self.pause_action.setText(tr("button.resume") if paused else tr("button.pause"))
         self.disconnect_action.setEnabled(bool(vpn.get("connected")))
+        autoconnect = self.status.get("autoconnect") or {}
+        enabled = bool(autoconnect.get("enabled", self.config.autoconnect_enabled))
+        target = autoconnect.get("target", self.config.autoconnect_target or None)
+        self.autoconnect_action.setChecked(enabled)
+        self.autoconnect_now_action.setEnabled(bool(target))
 
     # --------------------------------------------------------------- commands
     def _notify(self, message: str, *, error: bool = False) -> None:
@@ -267,6 +286,87 @@ class Tray(QSystemTrayIcon):
                     QSystemTrayIcon.MessageIcon.Information,
                     4000,
                 )
+            self._probe()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _toggle_autoconnect(self, checked: bool) -> None:
+        try:
+            current = config_module.load()
+        except PnoError:
+            current = self.config
+        if checked and not current.autoconnect_target:
+            self.autoconnect_action.setChecked(False)
+            self.showMessage(
+                tr("app.title"),
+                tr("autoconnect.no_target"),
+                QSystemTrayIcon.MessageIcon.Warning,
+                6000,
+            )
+            self._probe()
+            return
+        try:
+            updated = dataclasses.replace(
+                current, autoconnect_enabled=bool(checked)
+            ).validate()
+            config_module.save(updated)
+        except PnoError as exc:
+            self.autoconnect_action.setChecked(not checked)
+            self.showMessage(
+                tr("app.title"),
+                exc.describe(),
+                QSystemTrayIcon.MessageIcon.Critical,
+                6000,
+            )
+            self._probe()
+            return
+        self.config = updated
+        try:
+            request("config.reload", timeout=5)
+        except PnoError:
+            pass
+        self._probe()
+
+    def _autoconnect_now(self) -> None:
+        def worker() -> None:
+            try:
+                current = config_module.load()
+            except PnoError:
+                current = self.config
+            self.config = current
+            try:
+                result = autoconnect_once(
+                    current,
+                    reason="manual",
+                    snapshot_loader=lambda: ServerCache(
+                        helper_timeout=current.proton_helper_timeout
+                    ).get(max_age=current.servers_max_age),
+                )
+            except Exception as exc:  # noqa: BLE001 - the tray must stay alive
+                events.emit("error", "tray", "tray.autoconnect.crashed", {}, error=exc)
+                self.showMessage(
+                    tr("app.title"),
+                    tr(
+                        "autoconnect.failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    6000,
+                )
+            else:
+                if result.ok:
+                    message = tr("autoconnect.connected", server=result.server)
+                    icon = QSystemTrayIcon.MessageIcon.Information
+                elif result.status == "skipped":
+                    message = tr("autoconnect.skipped", reason=result.reason)
+                    icon = QSystemTrayIcon.MessageIcon.Warning
+                else:
+                    message = tr(
+                        "autoconnect.failed",
+                        error=result.error or result.reason,
+                    )
+                    icon = QSystemTrayIcon.MessageIcon.Critical
+                self.showMessage(tr("app.title"), message, icon, 6000)
             self._probe()
 
         threading.Thread(target=worker, daemon=True).start()

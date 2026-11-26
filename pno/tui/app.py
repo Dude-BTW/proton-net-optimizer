@@ -29,6 +29,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from pno import autoconnect as autoconnect_module
 from pno import config as config_module
 from pno import events
 from pno import favorites as favorites_module
@@ -130,6 +131,14 @@ class PnoApp(App[None]):
         self._favorites_text_draft = ""
         self._favorites_visual_draft: set[str] = set()
         self._favorites_visible_values: set[str] = set()
+
+        self.autoconnect_target: str | None = self.config.autoconnect_target or None
+        self._autoconnect_dirty_side: str | None = None
+        self._autoconnect_enabled_dirty = False
+        self._autoconnect_syncing = False
+        self._autoconnect_text_draft = ""
+        self._autoconnect_visual_draft: str | None = self.autoconnect_target
+        self._autoconnect_values: set[str] = set()
 
         self.servers_query = saved_state.servers_query
         self.secure_query = saved_state.secure_query
@@ -266,6 +275,46 @@ class PnoApp(App[None]):
                         )
                         yield Button(tr("favorites.revert"), id="favorites-revert")
                         yield Static("", id="favorites-status")
+            with TabPane(tr("tab.autoconnect"), id="tab-autoconnect"):
+                with Vertical(id="autoconnect-layout"):
+                    yield Static(tr("autoconnect.hint"), id="autoconnect-hint")
+                    yield Checkbox(
+                        tr("autoconnect.enabled"),
+                        value=self.config.autoconnect_enabled,
+                        id="autoconnect-enabled",
+                    )
+                    yield Static("", id="autoconnect-current")
+                    with Horizontal(id="autoconnect-panels"):
+                        with Vertical(id="autoconnect-visual-panel"):
+                            yield Static(
+                                tr("autoconnect.visual_title"),
+                                classes="autoconnect-title",
+                                id="autoconnect-visual-title",
+                            )
+                            yield SelectionList(id="autoconnect-list")
+                            yield Static("", id="autoconnect-visual-status")
+                        with Vertical(id="autoconnect-text-panel"):
+                            yield Static(
+                                tr("autoconnect.text_title"),
+                                classes="autoconnect-title",
+                                id="autoconnect-text-title",
+                            )
+                            yield TextArea(id="autoconnect-text")
+                            yield Static("", id="autoconnect-text-status")
+                    with Horizontal(id="autoconnect-actions"):
+                        yield Button(
+                            tr("autoconnect.apply"),
+                            id="autoconnect-apply-btn",
+                            variant="primary",
+                        )
+                        yield Button(
+                            tr("autoconnect.revert"), id="autoconnect-revert-btn"
+                        )
+                        yield Button(
+                            tr("autoconnect.connect_now"),
+                            id="autoconnect-now-btn",
+                        )
+                        yield Static("", id="autoconnect-status")
             with TabPane(tr("tab.mirrors"), id="tab-mirrors"):
                 with Vertical(id="mirror-layout"):
                     yield Static("", id="mirror-info")
@@ -619,6 +668,9 @@ class PnoApp(App[None]):
         self._refresh_logs()
         self._refresh_log_stats()
         self._reload_favorites()
+        self._rebuild_autoconnect_visual()
+        self._sync_autoconnect_editors()
+        self._update_autoconnect_controls()
         self._load_proton_settings()
         self._proton_info_worker()
         tabs = self.query_one("#tabs", TabbedContent)
@@ -1010,6 +1062,277 @@ class PnoApp(App[None]):
         self._update_favorites_controls()
         self._refresh_status()
         self.notify(tr("favorites.reverted"), severity="information")
+
+    # ---------------------------------------------------------- autoconnect
+    def _autoconnect_has_changes(self) -> bool:
+        return (
+            self._autoconnect_dirty_side is not None or self._autoconnect_enabled_dirty
+        )
+
+    def _render_autoconnect_current(self) -> None:
+        widget = self.query_one("#autoconnect-current", Static)
+        target = self.autoconnect_target
+        if not target:
+            widget.update(tr("autoconnect.none"))
+            return
+        key = (
+            "autoconnect.current_secure"
+            if autoconnect_module.target_kind(target) == "secure_core"
+            else "autoconnect.current_country"
+        )
+        widget.update(tr(key, target=target))
+
+    def _sync_autoconnect_editors(self) -> None:
+        target = self.autoconnect_target
+        self._autoconnect_text_draft = target or ""
+        self._autoconnect_visual_draft = target
+        self._autoconnect_syncing = True
+        try:
+            self.query_one("#autoconnect-text", TextArea).text = target or ""
+            widget = self.query_one("#autoconnect-list", SelectionList)
+            for value in list(widget.selected):
+                widget.deselect(value)
+            if target and target in self._autoconnect_values:
+                widget.select(target)
+        finally:
+            self._autoconnect_syncing = False
+        self._render_autoconnect_current()
+
+    def _rebuild_autoconnect_visual(self) -> None:
+        widget = self.query_one("#autoconnect-list", SelectionList)
+        status = self.query_one("#autoconnect-visual-status", Static)
+        self._autoconnect_values = set()
+        self._autoconnect_syncing = True
+        try:
+            widget.clear_options()
+            regular_count = 0
+            secure_count = 0
+            if self.snapshot is None:
+                status.update(tr("autoconnect.no_data"))
+            else:
+                options: list[tuple[str, str, bool]] = []
+                countries = regular_countries(
+                    self.snapshot,
+                    top_n=1,
+                    include_tor=self.config.include_tor,
+                    max_tier=self.snapshot.max_tier or None,
+                )
+                for country in sorted(countries, key=lambda item: item.code):
+                    value = country.code
+                    options.append(
+                        (
+                            country_label(value, get_language()),
+                            value,
+                            value == self._autoconnect_visual_draft,
+                        )
+                    )
+                    self._autoconnect_values.add(value)
+                    regular_count += 1
+                routes = secure_core_routes(
+                    self.snapshot,
+                    max_tier=self.snapshot.max_tier or None,
+                    include_tor=self.config.include_tor,
+                )
+                for route in sorted(
+                    routes, key=lambda item: (item.exit_code, item.name)
+                ):
+                    value = route.name.upper()
+                    label = (
+                        f"{flag(route.entry_code)} {route.entry_code} → "
+                        f"{flag(route.exit_code)} {route.exit_code}  {value}"
+                    )
+                    options.append(
+                        (label, value, value == self._autoconnect_visual_draft)
+                    )
+                    self._autoconnect_values.add(value)
+                    secure_count += 1
+                if options:
+                    widget.add_options(options)
+                status.update(
+                    tr(
+                        "autoconnect.visual_count",
+                        regular=regular_count,
+                        secure=secure_count,
+                    )
+                )
+        finally:
+            self._autoconnect_syncing = False
+        self._render_autoconnect_current()
+
+    def _set_autoconnect_dirty(self, side: str) -> None:
+        self._autoconnect_dirty_side = side
+        self._update_autoconnect_controls()
+
+    def _update_autoconnect_controls(self) -> None:
+        side = self._autoconnect_dirty_side
+        text = self.query_one("#autoconnect-text", TextArea)
+        visual = self.query_one("#autoconnect-list", SelectionList)
+        visual.disabled = side == "text"
+        text.read_only = side == "visual"
+        has_changes = self._autoconnect_has_changes()
+        self.query_one("#autoconnect-apply-btn", Button).disabled = not has_changes
+        self.query_one("#autoconnect-revert-btn", Button).disabled = not has_changes
+        self.query_one("#autoconnect-now-btn", Button).disabled = (
+            not bool(self.autoconnect_target) or self._vpn_action_running
+        )
+        status = self.query_one("#autoconnect-status", Static)
+        if side == "text":
+            status.update(tr("favorites.locked_text"))
+        elif side == "visual":
+            status.update(tr("favorites.locked_visual"))
+        else:
+            status.update("")
+
+    def _apply_autoconnect(self) -> None:
+        if not self._autoconnect_has_changes():
+            self.notify(tr("autoconnect.no_changes"), severity="information")
+            return
+        if self.snapshot is None:
+            self.query_one("#autoconnect-text-status", Static).update(
+                tr("autoconnect.no_data")
+            )
+            return
+        side = self._autoconnect_dirty_side
+        target = self.autoconnect_target or ""
+        if side == "text":
+            raw = self.query_one("#autoconnect-text", TextArea).text.strip()
+            if raw:
+                parsed = favorites_module.parse_text(raw, self.snapshot)
+                if parsed.errors:
+                    self.query_one("#autoconnect-text-status", Static).update(
+                        "\n".join(
+                            f"line {error.line}: {error.message}"
+                            for error in parsed.errors
+                        )
+                    )
+                    return
+                assert parsed.favorites is not None
+                entries = list(parsed.favorites.countries) + list(
+                    parsed.favorites.secure_core_servers
+                )
+                if len(entries) != 1:
+                    self.query_one("#autoconnect-text-status", Static).update(
+                        tr("autoconnect.single_entry")
+                    )
+                    return
+                target = entries[0]
+            else:
+                target = ""
+        elif side == "visual":
+            target = self._autoconnect_visual_draft or ""
+            if target:
+                problem = autoconnect_module.validate_target(self.snapshot, target)
+                if problem:
+                    self.query_one("#autoconnect-visual-status", Static).update(problem)
+                    return
+        enabled = bool(self.query_one("#autoconnect-enabled", Checkbox).value)
+        updated = dataclasses.replace(
+            self.config,
+            autoconnect_enabled=enabled,
+            autoconnect_target=autoconnect_module.normalize_target(target),
+        )
+        try:
+            updated.validate()
+        except PnoError as exc:
+            self.notify(exc.message, severity="error")
+            return
+        config_module.save(updated)
+        self.config = updated
+        self.autoconnect_target = updated.autoconnect_target or None
+        self._autoconnect_dirty_side = None
+        self._autoconnect_enabled_dirty = False
+        self.query_one("#autoconnect-text-status", Static).update("")
+        self.query_one("#autoconnect-visual-status", Static).update("")
+        self._rebuild_autoconnect_visual()
+        self._sync_autoconnect_editors()
+        self._update_autoconnect_controls()
+        self._reload_daemon_config()
+        self.notify(tr("autoconnect.saved"), severity="information")
+
+    def _revert_autoconnect(self) -> None:
+        self.autoconnect_target = self.config.autoconnect_target or None
+        self._autoconnect_dirty_side = None
+        self._autoconnect_enabled_dirty = False
+        self._autoconnect_syncing = True
+        try:
+            self.query_one("#autoconnect-enabled", Checkbox).value = (
+                self.config.autoconnect_enabled
+            )
+        finally:
+            self._autoconnect_syncing = False
+        self.query_one("#autoconnect-text-status", Static).update("")
+        self.query_one("#autoconnect-visual-status", Static).update("")
+        self._rebuild_autoconnect_visual()
+        self._sync_autoconnect_editors()
+        self._update_autoconnect_controls()
+        self.notify(tr("autoconnect.reverted"), severity="information")
+
+    def _start_autoconnect_now(self) -> None:
+        if not self.autoconnect_target:
+            self.notify(tr("autoconnect.no_target"), severity="warning")
+            return
+        if self._vpn_action_running:
+            self.notify(tr("notify.vpn_busy"), severity="warning")
+            return
+        self._vpn_action_running = True
+        self._refresh_status()
+        self._update_autoconnect_controls()
+        self._autoconnect_now_worker()
+
+    @work(thread=True, exclusive=True, group="connect")
+    def _autoconnect_now_worker(self) -> None:
+        result = None
+        error: Exception | None = None
+        try:
+            result = autoconnect_module.run_once(
+                self.config,
+                reason="manual",
+                snapshot=self.snapshot,
+                snapshot_loader=lambda: ServerCache(
+                    helper_timeout=self.config.proton_helper_timeout
+                ).get(max_age=self.config.servers_max_age),
+                status_reader=self._status_reader,
+            )
+        except Exception as exc:  # noqa: BLE001 - the TUI must stay usable
+            events.emit("error", "tui", "tui.autoconnect.crashed", {}, error=exc)
+            error = exc
+        finally:
+            self._finish_vpn_action_from_worker()
+        self.call_from_thread(self._after_autoconnect_now, result, error)
+
+    def _after_autoconnect_now(self, result, error: Exception | None) -> None:
+        if error is not None:
+            self.notify(
+                tr(
+                    "autoconnect.failed",
+                    error=f"{type(error).__name__}: {error}",
+                ),
+                severity="error",
+                timeout=8,
+            )
+            return
+        assert result is not None
+        if result.ok:
+            server = self.snapshot.lookup(result.server) if self.snapshot else None
+            load_text = f"{server.load}%" if server else "?"
+            self.notify(
+                tr("notify.connected", server=result.server, load=load_text),
+                severity="information",
+            )
+            self._remote_status_worker()
+        elif result.status == "skipped":
+            self.notify(
+                tr("autoconnect.skipped", reason=result.reason),
+                severity="warning",
+                timeout=8,
+            )
+        else:
+            self.notify(
+                tr("autoconnect.failed", error=result.error or result.reason),
+                severity="error",
+                timeout=8,
+            )
+        self._refresh_status()
 
     # ------------------------------------------------------- proton settings
     def _proton_connected(self) -> bool:
@@ -2067,6 +2390,7 @@ class PnoApp(App[None]):
                 tr("notify.refreshed", count=len(self.snapshot.servers)),
                 severity="information",
             )
+        self._rebuild_autoconnect_visual()
 
     def _status_reader(self):
         return read_vpn_status(self.snapshot)
@@ -2191,6 +2515,7 @@ class PnoApp(App[None]):
     def _finish_vpn_action(self) -> None:
         self._vpn_action_running = False
         self._refresh_status()
+        self._update_autoconnect_controls()
 
     def _start_connect(self, name: str, close_gui: bool = False) -> None:
         if self._vpn_action_running:
@@ -2375,6 +2700,66 @@ class PnoApp(App[None]):
             return
         selected = set(self.query_one("#favorites-list", SelectionList).selected)
         self._rebuild_favorites_visual(selected)
+
+    @on(TextArea.Changed, "#autoconnect-text")
+    def _on_autoconnect_text(self, event: TextArea.Changed) -> None:
+        if self._autoconnect_syncing:
+            return
+        if (
+            self.query_one("#autoconnect-text", TextArea).text
+            == self._autoconnect_text_draft
+        ):
+            return
+        if self._autoconnect_dirty_side is None:
+            self._set_autoconnect_dirty("text")
+        elif self._autoconnect_dirty_side != "text":
+            return
+
+    @on(SelectionList.SelectedChanged, "#autoconnect-list")
+    def _on_autoconnect_selection(self, event: SelectionList.SelectedChanged) -> None:
+        if self._autoconnect_syncing:
+            return
+        widget = event.selection_list
+        selected = list(widget.selected)
+        if len(selected) > 1:
+            keep = selected[-1]
+            self._autoconnect_syncing = True
+            try:
+                for value in selected:
+                    if value != keep:
+                        widget.deselect(value)
+            finally:
+                self._autoconnect_syncing = False
+            selected = [keep]
+        value = selected[0] if selected else None
+        if value == self._autoconnect_visual_draft:
+            return
+        self._autoconnect_visual_draft = value
+        if self._autoconnect_dirty_side is None:
+            self._set_autoconnect_dirty("visual")
+        elif self._autoconnect_dirty_side != "visual":
+            return
+
+    @on(Checkbox.Changed, "#autoconnect-enabled")
+    def _on_autoconnect_enabled(self, event: Checkbox.Changed) -> None:
+        if self._autoconnect_syncing:
+            return
+        self._autoconnect_enabled_dirty = (
+            bool(event.value) != self.config.autoconnect_enabled
+        )
+        self._update_autoconnect_controls()
+
+    @on(Button.Pressed, "#autoconnect-apply-btn")
+    def _on_autoconnect_apply(self) -> None:
+        self._apply_autoconnect()
+
+    @on(Button.Pressed, "#autoconnect-revert-btn")
+    def _on_autoconnect_revert(self) -> None:
+        self._revert_autoconnect()
+
+    @on(Button.Pressed, "#autoconnect-now-btn")
+    def _on_autoconnect_now(self) -> None:
+        self._start_autoconnect_now()
 
     @on(Checkbox.Changed, "#servers-inventory")
     def _on_servers_inventory(self, event: Checkbox.Changed) -> None:
@@ -2710,6 +3095,7 @@ class PnoApp(App[None]):
             ("tab-servers", "tab.servers"),
             ("tab-secure", "tab.secure"),
             ("tab-favorites", "tab.favorites"),
+            ("tab-autoconnect", "tab.autoconnect"),
             ("tab-mirrors", "tab.mirrors"),
             ("tab-logs", "tab.logs"),
             ("tab-proton", "tab.proton"),
@@ -2749,6 +3135,24 @@ class PnoApp(App[None]):
         self.query_one("#favorites-secure", Checkbox).label = tr("favorites.secure")
         self.query_one("#favorites-apply", Button).label = tr("favorites.apply")
         self.query_one("#favorites-revert", Button).label = tr("favorites.revert")
+        self.query_one("#autoconnect-hint", Static).update(tr("autoconnect.hint"))
+        self.query_one("#autoconnect-enabled", Checkbox).label = tr(
+            "autoconnect.enabled"
+        )
+        self.query_one("#autoconnect-visual-title", Static).update(
+            tr("autoconnect.visual_title")
+        )
+        self.query_one("#autoconnect-text-title", Static).update(
+            tr("autoconnect.text_title")
+        )
+        self.query_one("#autoconnect-apply-btn", Button).label = tr("autoconnect.apply")
+        self.query_one("#autoconnect-revert-btn", Button).label = tr(
+            "autoconnect.revert"
+        )
+        self.query_one("#autoconnect-now-btn", Button).label = tr(
+            "autoconnect.connect_now"
+        )
+        self._render_autoconnect_current()
         self.query_one("#label-log-size", Label).update(tr("logs.max_size"))
         self.query_one("#label-log-keep", Label).update(tr("logs.keep_files"))
         self.query_one("#label-log-age", Label).update(tr("logs.max_age"))

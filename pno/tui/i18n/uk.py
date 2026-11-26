@@ -5,6 +5,7 @@ MESSAGES = {
     "tab.servers": "Сервери",
     "tab.secure": "Secure Core",
     "tab.favorites": "Вибране",
+    "tab.autoconnect": "Автопідключення",
     "tab.mirrors": "Дзеркала",
     "tab.logs": "Логи",
     "tab.settings": "Застосунок",
@@ -82,6 +83,37 @@ MESSAGES = {
     "favorites.invalid": "Некоректні записи вибраного",
     "favorites.saved": "Вибране збережено",
     "favorites.reverted": "Зміни відкочено",
+    "autoconnect.hint": (
+        "Виберіть рівно одну ціль: звичайну країну (буде взято найменш "
+        "завантажений сервер) або точний маршрут Secure Core. Демон "
+        "підключається один раз за завантаження після входу і лише коли VPN "
+        "вимкнений. Збереження не підключає одразу."
+    ),
+    "autoconnect.enabled": "Підключатися автоматично при старті",
+    "autoconnect.visual_title": "Візуальний список (один запис)",
+    "autoconnect.text_title": "Текстове поле (один запис)",
+    "autoconnect.visual_count": (
+        "{regular} звичайних країн · {secure} маршрутів Secure Core"
+    ),
+    "autoconnect.no_data": "Даних про сервери немає; спершу оновіть їх.",
+    "autoconnect.none": "Ціль не вибрано",
+    "autoconnect.current_country": (
+        "Ціль: {target} — найменш завантажений звичайний сервер при старті"
+    ),
+    "autoconnect.current_secure": (
+        "Ціль: {target} — точний маршрут Secure Core при старті"
+    ),
+    "autoconnect.apply": "Застосувати",
+    "autoconnect.revert": "Скасувати",
+    "autoconnect.connect_now": "Підключитися зараз",
+    "autoconnect.no_changes": "Немає незбережених змін",
+    "autoconnect.single_entry": "Виберіть рівно одну країну або маршрут Secure Core.",
+    "autoconnect.saved": "Налаштування автопідключення збережено",
+    "autoconnect.reverted": "Зміни скасовано",
+    "autoconnect.no_target": "Спершу виберіть ціль автопідключення",
+    "autoconnect.skipped": "Автопідключення пропущено: {reason}",
+    "autoconnect.failed": "Не вдалося автопідключитися: {error}",
+    "autoconnect.connected": "Автопідключення: підключено до {server}",
     "mirrors.target": "Ціль: {country} ({source})",
     "mirrors.last": "Останнє оновлення: {when}",
     "mirrors.host": "Хост",
@@ -156,6 +188,7 @@ MESSAGES = {
     "requirements.continue": "Продовжити",
     "requirements.quit": "Вийти",
     "tray.open_tui": "Відкрити TUI",
+    "tray.autoconnect": "Автопідключення при старті",
     "tray.quit": "Закрити трей",
     "tray.ok": "успішно",
     "tray.failed": "помилка: {error}",

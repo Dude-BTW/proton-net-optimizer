@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from pno import cli
 from pno.cli import build_parser, main
 from pno.proton.killswitch import CleanupResult, KillSwitchReport
 
@@ -185,3 +186,101 @@ def test_logs_prune_command(tmp_path, capsys, monkeypatch):
     assert len(payload["removed"]) == 2
     assert active.is_file()
     assert len(list(archive.glob("*.jsonl"))) == 1
+
+
+def test_autoconnect_parser():
+    parser = build_parser()
+    args = parser.parse_args(["autoconnect", "set", "UA", "--json"])
+    assert args.autoconnect_command == "set"
+    assert args.target == "UA"
+    assert args.json is True
+    assert parser.parse_args(["autoconnect", "once"]).autoconnect_command == "once"
+
+
+def test_autoconnect_commands(monkeypatch, capsys):
+    from pno.proton.serverlist import snapshot_from_payload
+    from tests.fixtures import helper_payload, server
+
+    data = snapshot_from_payload(
+        helper_payload([server("UA#1", "UA", "UA", 10)]), source="helper"
+    )
+
+    class Cache:
+        def __init__(self, **kwargs):
+            pass
+
+        def get(self, **kwargs):
+            return data
+
+    monkeypatch.setattr(cli, "ServerCache", Cache)
+
+    assert main(["autoconnect", "set", "ua", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["target"] == "UA"
+    assert payload["kind"] == "country"
+    assert payload["enabled"] is False
+
+    assert main(["autoconnect", "enable", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["enabled"] is True
+
+    assert main(["autoconnect", "status", "--json"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["target"] == "UA"
+    assert status["enabled"] is True
+
+    assert main(["autoconnect", "clear", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["cleared"] is True
+
+    assert main(["autoconnect", "disable", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["enabled"] is False
+
+
+def test_autoconnect_set_rejects_unknown_target(monkeypatch, capsys):
+    from pno.proton.serverlist import snapshot_from_payload
+    from tests.fixtures import helper_payload, server
+
+    data = snapshot_from_payload(
+        helper_payload([server("UA#1", "UA", "UA", 10)]), source="helper"
+    )
+
+    class Cache:
+        def __init__(self, **kwargs):
+            pass
+
+        def get(self, **kwargs):
+            return data
+
+    monkeypatch.setattr(cli, "ServerCache", Cache)
+    assert main(["autoconnect", "set", "ZZ", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]["message"] == "invalid auto-connect target"
+
+
+def test_autoconnect_once_reports_the_result(monkeypatch, capsys):
+    from pno import autoconnect as autoconnect_module
+    from pno.autoconnect import AutoconnectResult
+
+    monkeypatch.setattr(
+        autoconnect_module,
+        "run_once",
+        lambda config, **kwargs: AutoconnectResult(
+            status="connected", reason="connected", target="UA", server="UA#1"
+        ),
+    )
+    assert main(["autoconnect", "once", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["server"] == "UA#1"
+
+    monkeypatch.setattr(
+        autoconnect_module,
+        "run_once",
+        lambda config, **kwargs: AutoconnectResult(
+            status="failed", reason="connect-failed", error="timeout"
+        ),
+    )
+    assert main(["autoconnect", "once", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"] == "timeout"

@@ -6,9 +6,20 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Sequence
 
 from pno.errors import HelperError, PnoError
+
+
+def read_boot_id() -> str:
+    """Return the current kernel boot id (empty when /proc is unavailable)."""
+    try:
+        return (
+            Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        )
+    except OSError:
+        return ""
 
 
 @dataclass(frozen=True)

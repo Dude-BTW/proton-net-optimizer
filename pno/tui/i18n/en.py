@@ -5,6 +5,7 @@ MESSAGES = {
     "tab.servers": "Servers",
     "tab.secure": "Secure Core",
     "tab.favorites": "Favorites",
+    "tab.autoconnect": "Auto connect",
     "tab.mirrors": "Mirrors",
     "tab.logs": "Logs",
     "tab.settings": "Application",
@@ -82,6 +83,36 @@ MESSAGES = {
     "favorites.invalid": "Invalid favorite entries",
     "favorites.saved": "Favorites saved",
     "favorites.reverted": "Changes reverted",
+    "autoconnect.hint": (
+        "Choose exactly one target: a regular country (its least-loaded server "
+        "is used) or an exact Secure Core route. The daemon connects once per "
+        "boot after login, only while disconnected. Saving does not connect."
+    ),
+    "autoconnect.enabled": "Connect automatically at startup",
+    "autoconnect.visual_title": "Visual list (one entry)",
+    "autoconnect.text_title": "Text editor (one entry)",
+    "autoconnect.visual_count": (
+        "{regular} regular countries · {secure} Secure Core routes"
+    ),
+    "autoconnect.no_data": "Server data is unavailable; refresh it first.",
+    "autoconnect.none": "No target selected",
+    "autoconnect.current_country": (
+        "Target: {target} — least-loaded regular server at startup"
+    ),
+    "autoconnect.current_secure": (
+        "Target: {target} — exact Secure Core route at startup"
+    ),
+    "autoconnect.apply": "Apply",
+    "autoconnect.revert": "Revert",
+    "autoconnect.connect_now": "Connect now",
+    "autoconnect.no_changes": "No unsaved changes",
+    "autoconnect.single_entry": "Choose exactly one country or Secure Core route.",
+    "autoconnect.saved": "Auto-connect setting saved",
+    "autoconnect.reverted": "Changes reverted",
+    "autoconnect.no_target": "Set an auto-connect target first",
+    "autoconnect.skipped": "Auto-connect skipped: {reason}",
+    "autoconnect.failed": "Auto-connect failed: {error}",
+    "autoconnect.connected": "Auto-connect: connected to {server}",
     "mirrors.target": "Target: {country} ({source})",
     "mirrors.last": "Last refresh: {when}",
     "mirrors.host": "Host",
@@ -155,6 +186,7 @@ MESSAGES = {
     "requirements.continue": "Continue",
     "requirements.quit": "Quit",
     "tray.open_tui": "Open TUI",
+    "tray.autoconnect": "Auto connect at startup",
     "tray.quit": "Quit tray",
     "tray.ok": "ok",
     "tray.failed": "failed: {error}",

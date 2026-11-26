@@ -967,3 +967,78 @@ def test_tui_best_from_favorites_limits_the_banner(monkeypatch):
         set_language("en")
 
     asyncio.run(scenario())
+
+
+def test_tui_autoconnect_accepts_only_one_visual_target(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            widget = app.query_one("#autoconnect-list", SelectionList)
+            widget.select("UA")
+            widget.select("DE")
+            await pilot.pause()
+            assert len(widget.selected) == 1
+            assert app._autoconnect_dirty_side == "visual"
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_autoconnect_text_saves_one_target(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.query_one("#autoconnect-enabled", Checkbox).value = True
+            app.query_one("#autoconnect-text", TextArea).text = "DE"
+            await pilot.pause()
+            assert app._autoconnect_dirty_side == "text"
+            app._apply_autoconnect()
+            await pilot.pause()
+            from pno import config as config_module
+
+            saved = config_module.load()
+            assert saved.autoconnect_enabled is True
+            assert saved.autoconnect_target == "DE"
+            assert app.config.autoconnect_target == "DE"
+
+            app.query_one("#autoconnect-text", TextArea).text = "DE\nFR"
+            await pilot.pause()
+            app._apply_autoconnect()
+            await pilot.pause()
+            assert config_module.load().autoconnect_target == "DE"
+            status = str(app.query_one("#autoconnect-text-status", Static).content)
+            assert tr("autoconnect.single_entry") in status
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_autoconnect_connect_now_is_guarded(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            started = []
+            app._autoconnect_now_worker = lambda: started.append(True)
+            app.autoconnect_target = "DE"
+            app._update_autoconnect_controls()
+            app._start_autoconnect_now()
+            assert started == [True]
+            assert app._vpn_action_running is True
+            app._finish_vpn_action()
+            await pilot.pause()
+            assert app.query_one("#autoconnect-now-btn", Button).disabled is False
+        set_language("en")
+
+    asyncio.run(scenario())

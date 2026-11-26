@@ -269,6 +269,78 @@ RequirementsScreen {
     margin-right: 2;
 }
 
+#autoconnect-layout {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#autoconnect-hint {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#autoconnect-enabled {
+    width: auto;
+    margin-top: 1;
+}
+
+#autoconnect-current {
+    height: auto;
+    min-height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#autoconnect-panels {
+    height: 1fr;
+}
+
+#autoconnect-visual-panel {
+    width: 3fr;
+    height: 1fr;
+    padding-right: 1;
+}
+
+#autoconnect-text-panel {
+    width: 2fr;
+    height: 1fr;
+    padding-left: 1;
+}
+
+.autoconnect-title {
+    height: 1;
+    text-style: bold;
+    color: $text-muted;
+}
+
+#autoconnect-list {
+    height: 1fr;
+    border: round $accent;
+}
+
+#autoconnect-text {
+    height: 1fr;
+    border: round $accent;
+}
+
+#autoconnect-visual-status,
+#autoconnect-text-status {
+    height: auto;
+    min-height: 1;
+    color: $text-muted;
+}
+
+#autoconnect-actions {
+    height: auto;
+    padding: 1 0;
+    align: left middle;
+}
+
+#autoconnect-actions Button {
+    margin-right: 2;
+}
+
 #favorites-status {
     width: 1fr;
     padding: 1 0;

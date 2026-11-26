@@ -505,3 +505,17 @@ def test_wait_for_disconnected_times_out():
         )
         is True
     )
+
+
+def test_disconnect_marks_the_manual_boot():
+    from pno import paths
+    from pno.proc import read_boot_id
+    from pno.state import StateStore
+
+    disconnect_server(
+        processes=[],
+        runner=lambda args, **kwargs: command(args, stdout="disconnected"),
+    )
+    state = StateStore(paths.state_file()).read()
+    assert state["manual_disconnect_boot_id"] == read_boot_id()
+    assert state["manual_disconnect_at"] > 0

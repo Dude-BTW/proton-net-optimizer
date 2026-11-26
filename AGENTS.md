@@ -6,7 +6,10 @@ the least-loaded Proton VPN server by runtime measurements and (2) keeps the
 Arch Linux mirror list matched to the current VPN exit country.
 
 The user makes the connection decision. The tool measures, ranks and presents;
-it must never switch servers on its own.
+it must never switch servers on its own. The single exception is the
+user-configured startup auto-connect described under Constraints: it runs in a
+single bounded window per boot to a target the user chose and never touches an
+active connection.
 
 ## Environment
 - Arch Linux, KDE Plasma 6, Wayland.
@@ -38,6 +41,8 @@ it must never switch servers on its own.
   are ignored by git.
 - Favorites are data only: never encode a preference or order between entries.
   Every ordering is computed from live measurements.
+- The auto-connect target is personal data (`autoconnect_target` in
+  `config.toml`); never hardcode a country or route in tracked files.
 
 ## Data sources
 - Server loads: `pno/proton/fetch_helper.py`, executed with `/usr/bin/python3`
@@ -67,9 +72,13 @@ it must never switch servers on its own.
 - The privileged mirror helper must stay self-contained, standard-library
   only, root-owned, and validated line by line. Never let it import
   user-writable code.
-- Auto-switch, auto-connect and auto-disconnect are out of scope. Only the
-  user's explicit Connect/Disconnect actions (CLI/TUI/tray) may call
-  `protonvpn connect` / `protonvpn disconnect`.
+- Auto-switch and auto-disconnect are out of scope. Auto-connect is allowed
+  only in a single bounded startup window per boot/login, only when the user
+  enabled it and chose exactly one target (a regular country or an exact
+  Secure Core route), only while disconnected, never by closing the Proton
+  GUI, and never after the user disconnected during that boot.
+  `pno autoconnect once` is the only explicit bypass of the boot guard. Every
+  other connect/disconnect must come from a user action (CLI/TUI/tray).
 - Closing the Proton VPN GUI always requires explicit consent (TUI dialog or
   `--close-gui`). Detect it by scanning `/proc/*/cmdline`; NetworkManager does
   not record which frontend owns a connection.
@@ -94,6 +103,12 @@ it must never switch servers on its own.
   apply compares `Server =` lines and skips the write).
 - The daemon must survive network loss, crashes and reboot. Pause state,
   schedule and last errors are persisted in `state.json`.
+- Startup auto-connect is one-shot per boot (`/proc/sys/kernel/random/boot_id`
+  stored in `state.json`), respects pause and the GUI rule, retries for at
+  most two minutes, and never reconnects after a manual disconnect. It chooses
+  the least-loaded eligible server of the selected country or the exact
+  selected Secure Core route; missing data is skipped and stale loads are
+  logged before use.
 - Machine logs are JSONL in `$XDG_STATE_HOME/proton-net-optimizer/logs/`.
   Redact secrets, rotate by size, tolerate a torn last line. Writes, rotation
   and retention pruning share an `flock`; never delete the active file.
@@ -138,6 +153,8 @@ it must never switch servers on its own.
 - `pno/requirements.py` — startup component checks shared by TUI/tray/daemon.
 - `pno/favorites.py` — personal favorites parsing/validation/saving; uses only
   `~/.config/proton-net-optimizer/inventory.toml`.
+- `pno/autoconnect.py` — startup target parsing, selection and the one-shot
+  connect helper shared by CLI, TUI, tray and daemon.
 - `pno/proton/` — helpers, cache, status, selection, GUI detection, connection
   actions, Proton settings (`settings.py`, `account.py`, `settings.json` is
   owned by Proton) and the account/protocol helper.

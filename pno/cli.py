@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -154,6 +156,26 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument(
             "--stdin", action="store_true", help="read entries from stdin"
         )
+
+    autoconnect = sub.add_parser("autoconnect", help="connect automatically at startup")
+    _add_json_flag(autoconnect)
+    autoconnect_sub = autoconnect.add_subparsers(
+        dest="autoconnect_command", required=True
+    )
+    for name, help_text in (
+        ("status", "show the startup auto-connect setting"),
+        ("set", "set one country or Secure Core target"),
+        ("clear", "remove the target"),
+        ("enable", "enable startup auto-connect"),
+        ("disable", "disable startup auto-connect"),
+        ("once", "connect to the saved target now"),
+    ):
+        item = autoconnect_sub.add_parser(name, help=help_text)
+        _add_json_flag(item)
+    autoconnect_sub.choices["set"].add_argument(
+        "target",
+        help="country code (UA) or Secure Core route (CH-US#3)",
+    )
 
     vpn = sub.add_parser("vpn", help="read or change Proton VPN settings")
     _add_json_flag(vpn)
@@ -374,6 +396,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_connect(args, config)
     if command == "favorites":
         return _cmd_favorites(args, config)
+    if command == "autoconnect":
+        return _cmd_autoconnect(args, config)
     if command == "disconnect":
         return _cmd_disconnect(args, config)
     if command == "mirrors":
@@ -714,6 +738,147 @@ def _cmd_favorites(args: argparse.Namespace, config: Config) -> int:
         for warning in parsed.warnings:
             print(f"warning: {warning}")
     return 0
+
+
+# -------------------------------------------------------------- autoconnect
+def _autoconnect_payload(config: Config, state: dict[str, Any]) -> dict[str, Any]:
+    from pno import autoconnect as autoconnect_module
+
+    target = autoconnect_module.normalize_target(config.autoconnect_target) or None
+    return {
+        "enabled": config.autoconnect_enabled,
+        "target": target,
+        "kind": autoconnect_module.target_kind(target) if target else None,
+        "attempted_at": state.get("autoconnect_attempted_at"),
+        "result": state.get("autoconnect_result"),
+        "reason": state.get("autoconnect_reason"),
+        "server": state.get("autoconnect_server"),
+        "error": state.get("autoconnect_error"),
+    }
+
+
+def _save_config(config: Config) -> Config:
+    saved = dataclasses.replace(config).validate()
+    config_module.save(saved)
+    return saved
+
+
+def _notify_daemon_config() -> None:
+    try:
+        request("config.reload", timeout=5)
+    except PnoError:
+        pass
+
+
+def _cmd_autoconnect(args: argparse.Namespace, config: Config) -> int:
+    from pno import autoconnect as autoconnect_module
+
+    sub = args.autoconnect_command
+    state_store = StateStore(paths.state_file())
+
+    if sub == "status":
+        payload = {
+            "ok": True,
+            **_autoconnect_payload(config, state_store.read()),
+        }
+        if args.json:
+            _print(payload, True)
+            return 0
+        print(f"Enabled:  {'yes' if payload['enabled'] else 'no'}")
+        print(f"Target:   {payload['target'] or '-'}")
+        if payload["kind"]:
+            print(f"Kind:     {payload['kind']}")
+        if payload["attempted_at"]:
+            when = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(payload["attempted_at"])
+            )
+            print(f"Last:     {payload['result'] or '?'} @ {when}")
+            if payload["server"]:
+                print(f"Server:   {payload['server']}")
+            if payload["error"]:
+                print(f"Error:    {payload['error']}")
+        return 0
+
+    if sub in {"enable", "disable"}:
+        updated = _save_config(
+            dataclasses.replace(config, autoconnect_enabled=sub == "enable")
+        )
+        _notify_daemon_config()
+        payload = {
+            "ok": True,
+            "enabled": updated.autoconnect_enabled,
+            "target": updated.autoconnect_target or None,
+        }
+        if args.json:
+            _print(payload, True)
+        else:
+            print(
+                f"Startup auto-connect: {'enabled' if payload['enabled'] else 'disabled'}"
+            )
+        return 0
+
+    if sub == "clear":
+        updated = _save_config(dataclasses.replace(config, autoconnect_target=""))
+        _notify_daemon_config()
+        payload = {"ok": True, "cleared": True, "enabled": updated.autoconnect_enabled}
+        if args.json:
+            _print(payload, True)
+        else:
+            print("Auto-connect target cleared")
+        return 0
+
+    if sub == "set":
+        target = autoconnect_module.normalize_target(args.target)
+        if autoconnect_module.target_kind(target) is None:
+            raise PnoError(
+                "invalid auto-connect target",
+                detail=target,
+                hint="Use a country code such as UA or a route such as CH-US#3.",
+            )
+        snapshot = ServerCache(helper_timeout=config.proton_helper_timeout).get(
+            max_age=config.servers_max_age
+        )
+        problem = autoconnect_module.validate_target(snapshot, target)
+        if problem:
+            raise PnoError("invalid auto-connect target", detail=problem)
+        updated = _save_config(dataclasses.replace(config, autoconnect_target=target))
+        _notify_daemon_config()
+        payload = {
+            "ok": True,
+            "enabled": updated.autoconnect_enabled,
+            "target": updated.autoconnect_target,
+            "kind": autoconnect_module.target_kind(updated.autoconnect_target),
+        }
+        if args.json:
+            _print(payload, True)
+        else:
+            print(f"Auto-connect target: {payload['target']} ({payload['kind']})")
+            if not payload["enabled"]:
+                print(
+                    "Note: startup auto-connect is disabled; run 'pno autoconnect enable'."
+                )
+        return 0
+
+    if sub == "once":
+        result = autoconnect_module.run_once(
+            config,
+            reason="manual",
+            snapshot_loader=lambda: ServerCache(
+                helper_timeout=config.proton_helper_timeout
+            ).get(max_age=config.servers_max_age),
+        )
+        payload = {"ok": result.ok, **result.to_dict()}
+        if args.json:
+            _print(payload, True)
+        elif result.ok:
+            print(f"Connected to {result.server} for target {result.target}")
+        elif result.status == "skipped":
+            print(f"Auto-connect skipped: {result.reason}")
+        else:
+            print(f"Auto-connect failed: {result.error or result.reason}")
+        return 0 if result.ok else 1
+
+    raise PnoError("unknown autoconnect command", detail=sub)
 
 
 # ------------------------------------------------------------------------ vpn

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 
+from pno.autoconnect import AutoconnectResult
 from pno.config import Config
 from pno.daemon import Daemon
 from pno.proton.killswitch import CleanupResult, KillSwitchReport
@@ -21,7 +22,7 @@ class FakeCache:
         return SERVERS
 
 
-def make_daemon(tmp_path, *, vpn=None, config=None, killswitch_cleaner=None):
+def make_daemon(tmp_path, *, vpn=None, config=None, killswitch_cleaner=None, **kwargs):
     state = StateStore(tmp_path / "state.json")
     return Daemon(
         config or Config(),
@@ -31,6 +32,7 @@ def make_daemon(tmp_path, *, vpn=None, config=None, killswitch_cleaner=None):
         or VpnStatus(connected=False, source="test", checked_at=time.time()),
         killswitch_cleaner=killswitch_cleaner or _no_killswitch_cleanup,
         socket_path=tmp_path / "run.sock",
+        **kwargs,
     )
 
 
@@ -240,3 +242,172 @@ def test_vpn_change_schedules_only_when_exit_changes(tmp_path):
         daemon._pending_mirror.cancel()
 
     asyncio.run(scenario())
+
+
+def test_autoconnect_runs_once_per_boot(tmp_path):
+    calls: list[dict] = []
+
+    def runner(config, **kwargs):
+        calls.append(kwargs)
+        return AutoconnectResult(
+            status="connected", reason="connected", target="UA", server="UA#1"
+        )
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-1",
+        autoconnect_delays=(0.0,),
+    )
+    daemon.servers = SERVERS
+
+    async def scenario():
+        await daemon._autoconnect_loop()
+        assert len(calls) == 1
+        await daemon._autoconnect_loop()
+        assert len(calls) == 1
+
+    asyncio.run(scenario())
+    state = daemon.state.read()
+    assert state["autoconnect_boot_id"] == "boot-1"
+    assert state["autoconnect_result"] == "connected"
+    assert state["autoconnect_server"] == "UA#1"
+
+    second = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-2",
+        autoconnect_delays=(0.0,),
+    )
+    second.servers = SERVERS
+
+    async def next_boot():
+        await second._autoconnect_loop()
+
+    asyncio.run(next_boot())
+    assert len(calls) == 2
+
+
+def test_autoconnect_respects_pause_and_does_not_mark_the_boot(tmp_path):
+    calls: list[dict] = []
+
+    def runner(config, **kwargs):
+        calls.append(kwargs)
+        return AutoconnectResult(status="connected", reason="connected")
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-1",
+        autoconnect_delays=(0.0,),
+    )
+    daemon.servers = SERVERS
+    daemon.state.update(lambda current: current.update({"paused": True}))
+
+    async def scenario():
+        await daemon._autoconnect_loop()
+
+    asyncio.run(scenario())
+    assert calls == []
+    assert daemon.state.read().get("autoconnect_attempted_at") is None
+
+
+def test_autoconnect_retries_failures_within_the_window(tmp_path):
+    results = [
+        AutoconnectResult(status="failed", reason="connect-failed", error="timeout"),
+        AutoconnectResult(
+            status="connected", reason="connected", target="UA", server="UA#1"
+        ),
+    ]
+    calls: list[dict] = []
+
+    def runner(config, **kwargs):
+        calls.append(kwargs)
+        return results.pop(0)
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-1",
+        autoconnect_delays=(0.0, 0.0),
+    )
+    daemon.servers = SERVERS
+
+    async def scenario():
+        await daemon._autoconnect_loop()
+
+    asyncio.run(scenario())
+    assert len(calls) == 2
+    state = daemon.state.read()
+    assert state["autoconnect_result"] == "connected"
+
+
+def test_autoconnect_skips_a_boot_already_attempted(tmp_path):
+    calls: list[dict] = []
+
+    def runner(config, **kwargs):
+        calls.append(kwargs)
+        return AutoconnectResult(status="connected", reason="connected")
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-1",
+        autoconnect_delays=(0.0,),
+    )
+    daemon.servers = SERVERS
+    daemon.state.update(
+        lambda current: current.update(
+            {"autoconnect_boot_id": "boot-1", "autoconnect_attempted_at": 1.0}
+        )
+    )
+
+    async def scenario():
+        await daemon._autoconnect_loop()
+
+    asyncio.run(scenario())
+    assert calls == []
+
+
+def test_autoconnect_is_suppressed_after_a_manual_disconnect(tmp_path):
+    calls: list[dict] = []
+
+    def runner(config, **kwargs):
+        calls.append(kwargs)
+        return AutoconnectResult(status="connected", reason="connected")
+
+    daemon = make_daemon(
+        tmp_path,
+        config=Config(autoconnect_enabled=True, autoconnect_target="UA"),
+        autoconnect_runner=runner,
+        boot_id="boot-1",
+        autoconnect_delays=(0.0,),
+    )
+    daemon.servers = SERVERS
+    daemon.state.update(
+        lambda current: current.update(
+            {"manual_disconnect_boot_id": "boot-1", "manual_disconnect_at": 1.0}
+        )
+    )
+
+    async def scenario():
+        await daemon._autoconnect_loop()
+
+    asyncio.run(scenario())
+    assert calls == []
+    assert daemon.state.read().get("autoconnect_attempted_at") is None
+
+    daemon.state.update(
+        lambda current: current.update({"manual_disconnect_boot_id": "boot-0"})
+    )
+
+    async def other_boot():
+        await daemon._autoconnect_loop()
+
+    asyncio.run(other_boot())
+    assert len(calls) == 1

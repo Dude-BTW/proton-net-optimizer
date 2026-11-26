@@ -129,3 +129,24 @@ def test_log_limits_validation():
         Config(log_keep_files=-1).validate()
     with pytest.raises(ConfigError):
         Config(log_max_age_days=-1).validate()
+
+
+def test_autoconnect_defaults_roundtrip_and_validation(tmp_path):
+    config = Config().validate()
+    assert config.autoconnect_enabled is False
+    assert config.autoconnect_target == ""
+
+    path = tmp_path / "config.toml"
+    config_module.save(
+        Config(autoconnect_enabled=True, autoconnect_target=" ch-us#3 "), path
+    )
+    loaded = config_module.load(path)
+    assert loaded.autoconnect_enabled is True
+    assert loaded.autoconnect_target == "CH-US#3"
+
+    assert Config(autoconnect_target="ua").validate().autoconnect_target == "UA"
+    with pytest.raises(ConfigError):
+        Config(autoconnect_target="UA#1").validate()
+    path.write_text('autoconnect_enabled = "yes"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        config_module.load(path)
