@@ -888,3 +888,30 @@ def test_log_limits_are_editable_in_the_tui(monkeypatch):
         set_language("en")
 
     asyncio.run(scenario())
+
+
+def test_tui_vpn_action_guard_disables_buttons(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            spawned = []
+            app._connect_worker = lambda name, close_gui=False: spawned.append(name)
+            app._vpn_action_running = True
+            app._refresh_status()
+            await pilot.pause()
+            assert app.query_one("#connect-btn", Button).disabled is True
+            assert app.query_one("#secure-connect-btn", Button).disabled is True
+            app._start_connect("UA#1")
+            assert spawned == []
+            app._finish_vpn_action()
+            await pilot.pause()
+            assert app.query_one("#connect-btn", Button).disabled is False
+            app._start_connect("UA#1")
+            assert spawned == ["UA#1"]
+        set_language("en")
+
+    asyncio.run(scenario())

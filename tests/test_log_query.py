@@ -103,3 +103,25 @@ def datetime_now():
     import datetime
 
     return datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+
+def test_format_text_includes_error_detail_and_hint():
+    line = log_query.format_text(
+        {
+            "ts": "2026-01-01T00:00:00Z",
+            "level": "error",
+            "component": "vpn",
+            "event": "vpn.disconnect.failed",
+            "data": {},
+            "error": {
+                "code": "vpn_error",
+                "message": "protonvpn disconnect failed",
+                "detail": (
+                    "Disconnected.\n" "Error: Network connectivity issues detected."
+                ),
+                "hint": "Check the internet connection.",
+            },
+        }
+    )
+    assert "detail=Disconnected. Error: Network connectivity issues detected." in line
+    assert "hint=Check the internet connection." in line

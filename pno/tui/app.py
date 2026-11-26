@@ -35,7 +35,7 @@ from pno import favorites as favorites_module
 from pno import inventory as inventory_module
 from pno import log_query, paths
 from pno.config import Config
-from pno.errors import PnoError, SettingsError
+from pno.errors import PnoError, SettingsError, VpnBusyError
 from pno.ipc import request
 from pno.mirrors.pacman_db import format_age_hours
 from pno.mirrors.service import mirrors_overview
@@ -158,6 +158,7 @@ class PnoApp(App[None]):
         self._programmatic = False
         self._pending_gui_action: str | None = None
         self._pending_gui_server: str | None = None
+        self._vpn_action_running = False
 
     def get_css_variables(self) -> dict[str, str]:
         variables = super().get_css_variables()
@@ -1788,7 +1789,10 @@ class PnoApp(App[None]):
         self.query_one("#pause-btn", Button).label = (
             tr("button.resume") if paused else tr("button.pause")
         )
-        self.query_one("#disconnect-btn", Button).disabled = not connected
+        busy = self._vpn_action_running
+        self.query_one("#connect-btn", Button).disabled = busy
+        self.query_one("#secure-connect-btn", Button).disabled = busy
+        self.query_one("#disconnect-btn", Button).disabled = not connected or busy
         self.query_one("#disconnect-btn", Button).label = tr("button.disconnect")
         self._render_current_info()
         self._refresh_proton_controls()
@@ -1982,6 +1986,9 @@ class PnoApp(App[None]):
             payload = request("status", timeout=2.0)
         except PnoError:
             payload = None
+        except Exception as exc:  # noqa: BLE001 - the TUI must stay usable
+            events.emit("error", "tui", "tui.remote.crashed", {}, error=exc)
+            payload = None
         self.call_from_thread(self._apply_remote_status, payload)
 
     def _apply_remote_status(self, payload: dict[str, Any] | None) -> None:
@@ -2009,6 +2016,18 @@ class PnoApp(App[None]):
                     self.notify, str(exc), severity="error", timeout=8
                 )
                 return
+            except Exception as exc:  # noqa: BLE001 - the TUI must stay usable
+                events.emit("error", "tui", "tui.servers.crashed", {}, error=exc)
+                self.call_from_thread(
+                    self.notify,
+                    tr(
+                        "notify.refresh_failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
+                    severity="error",
+                    timeout=8,
+                )
+                return
         self.call_from_thread(self._after_server_refresh)
 
     def _after_server_refresh(self) -> None:
@@ -2033,6 +2052,12 @@ class PnoApp(App[None]):
     @work(thread=True, exclusive=True, group="connect")
     def _connect_worker(self, name: str, close_gui: bool = False) -> None:
         try:
+            self._perform_connect(name, close_gui)
+        finally:
+            self._finish_vpn_action_from_worker()
+
+    def _perform_connect(self, name: str, close_gui: bool) -> None:
+        try:
             outcome = connect_server(
                 name,
                 close_gui=close_gui,
@@ -2041,10 +2066,29 @@ class PnoApp(App[None]):
         except GuiActiveError as exc:
             self.call_from_thread(self._show_gui_conflict, "connect", name, exc)
             return
+        except VpnBusyError:
+            self.call_from_thread(
+                self.notify,
+                tr("notify.vpn_busy"),
+                severity="warning",
+                timeout=6,
+            )
+            return
         except PnoError as exc:
             self.call_from_thread(
                 self.notify,
                 tr("notify.connect_failed", error=exc.describe()),
+                severity="error",
+                timeout=8,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - the TUI must stay usable
+            events.emit(
+                "error", "tui", "tui.connect.crashed", {"server": name}, error=exc
+            )
+            self.call_from_thread(
+                self.notify,
+                tr("notify.connect_failed", error=f"{type(exc).__name__}: {exc}"),
                 severity="error",
                 timeout=8,
             )
@@ -2068,14 +2112,37 @@ class PnoApp(App[None]):
     @work(thread=True, exclusive=True, group="disconnect")
     def _disconnect_worker(self, close_gui: bool = False) -> None:
         try:
-            disconnect_server(close_gui=close_gui)
+            self._perform_disconnect(close_gui)
+        finally:
+            self._finish_vpn_action_from_worker()
+
+    def _perform_disconnect(self, close_gui: bool) -> None:
+        try:
+            disconnect_server(close_gui=close_gui, status_reader=self._status_reader)
         except GuiActiveError as exc:
             self.call_from_thread(self._show_gui_conflict, "disconnect", None, exc)
+            return
+        except VpnBusyError:
+            self.call_from_thread(
+                self.notify,
+                tr("notify.vpn_busy"),
+                severity="warning",
+                timeout=6,
+            )
             return
         except PnoError as exc:
             self.call_from_thread(
                 self.notify,
                 tr("notify.disconnect_failed", error=exc.describe()),
+                severity="error",
+                timeout=8,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - the TUI must stay usable
+            events.emit("error", "tui", "tui.disconnect.crashed", {}, error=exc)
+            self.call_from_thread(
+                self.notify,
+                tr("notify.disconnect_failed", error=f"{type(exc).__name__}: {exc}"),
                 severity="error",
                 timeout=8,
             )
@@ -2091,6 +2158,33 @@ class PnoApp(App[None]):
             self.notify, tr("notify.disconnected"), severity="information"
         )
         self.call_from_thread(self._remote_status_worker)
+
+    def _finish_vpn_action_from_worker(self) -> None:
+        try:
+            self.call_from_thread(self._finish_vpn_action)
+        except RuntimeError:
+            # The application is shutting down; nothing left to re-enable.
+            pass
+
+    def _finish_vpn_action(self) -> None:
+        self._vpn_action_running = False
+        self._refresh_status()
+
+    def _start_connect(self, name: str, close_gui: bool = False) -> None:
+        if self._vpn_action_running:
+            self.notify(tr("notify.vpn_busy"), severity="warning", timeout=6)
+            return
+        self._vpn_action_running = True
+        self._refresh_status()
+        self._connect_worker(name, close_gui=close_gui)
+
+    def _start_disconnect(self, close_gui: bool = False) -> None:
+        if self._vpn_action_running:
+            self.notify(tr("notify.vpn_busy"), severity="warning", timeout=6)
+            return
+        self._vpn_action_running = True
+        self._refresh_status()
+        self._disconnect_worker(close_gui=close_gui)
 
     def _show_gui_conflict(
         self, action: str, server: str | None, exc: GuiActiveError
@@ -2125,9 +2219,9 @@ class PnoApp(App[None]):
         if not confirmed:
             return
         if action == "connect" and server:
-            self._connect_worker(server, close_gui=True)
+            self._start_connect(server, close_gui=True)
         elif action == "disconnect":
-            self._disconnect_worker(close_gui=True)
+            self._start_disconnect(close_gui=True)
 
     def _mirror_crashed(self, event: str, exc: BaseException, *, apply: bool) -> None:
         events.emit("error", "mirrors", event, {"apply": apply}, error=exc)
@@ -2287,7 +2381,7 @@ class PnoApp(App[None]):
         if not self.selected_secure_server:
             self.notify(tr("notify.no_selection"), severity="warning")
             return
-        self._connect_worker(self.selected_secure_server)
+        self._start_connect(self.selected_secure_server)
 
     @on(Button.Pressed, "#copy-btn")
     def _on_copy(self) -> None:
@@ -2403,7 +2497,7 @@ class PnoApp(App[None]):
         if not self.selected_server:
             self.notify(tr("notify.no_selection"), severity="warning")
             return
-        self._connect_worker(self.selected_server)
+        self._start_connect(self.selected_server)
 
     def action_disconnect(self) -> None:
         vpn = (
@@ -2414,7 +2508,7 @@ class PnoApp(App[None]):
         if not vpn.get("connected"):
             self.notify(tr("notify.not_connected"), severity="warning")
             return
-        self._disconnect_worker()
+        self._start_disconnect()
 
     def action_toggle_pause(self) -> None:
         state = self.state_store.read()

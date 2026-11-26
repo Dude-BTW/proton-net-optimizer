@@ -22,7 +22,7 @@ except ImportError as exc:  # pragma: no cover - depends on the host
 from pno import config as config_module
 from pno import events, paths
 from pno.config import Config
-from pno.errors import PnoError
+from pno.errors import PnoError, VpnBusyError
 from pno.ipc import request
 from pno.proton.connection import GuiActiveError, disconnect_server
 from pno.proton.killswitch import cleanup_stale_killswitch
@@ -185,7 +185,21 @@ class Tray(QSystemTrayIcon):
                 self.status_ready.emit(self.status)
                 self.showMessage(
                     tr("app.title"),
-                    f"{label}: {exc.message}",
+                    f"{label}: {exc.describe()}",
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    6000,
+                )
+            except Exception as exc:  # noqa: BLE001 - the tray must stay alive
+                events.emit(
+                    "error",
+                    "tray",
+                    "tray.command.crashed",
+                    {"command": command},
+                    error=exc,
+                )
+                self.showMessage(
+                    tr("app.title"),
+                    f"{label}: {type(exc).__name__}: {exc}",
                     QSystemTrayIcon.MessageIcon.Critical,
                     6000,
                 )
@@ -221,10 +235,28 @@ class Tray(QSystemTrayIcon):
                     QSystemTrayIcon.MessageIcon.Warning,
                     6000,
                 )
+            except VpnBusyError:
+                self.showMessage(
+                    tr("app.title"),
+                    tr("notify.vpn_busy"),
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    6000,
+                )
             except PnoError as exc:
                 self.showMessage(
                     tr("app.title"),
                     tr("notify.disconnect_failed", error=exc.describe()),
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    6000,
+                )
+            except Exception as exc:  # noqa: BLE001 - the tray must stay alive
+                events.emit("error", "tray", "tray.disconnect.crashed", {}, error=exc)
+                self.showMessage(
+                    tr("app.title"),
+                    tr(
+                        "notify.disconnect_failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
                     QSystemTrayIcon.MessageIcon.Critical,
                     6000,
                 )
@@ -245,6 +277,13 @@ class Tray(QSystemTrayIcon):
                 result = cleanup_stale_killswitch(force=False)
             except PnoError as exc:
                 message = tr("proton.killswitch.clean_failed", error=exc.message)
+                icon = QSystemTrayIcon.MessageIcon.Critical
+            except Exception as exc:  # noqa: BLE001 - the tray must stay alive
+                events.emit("error", "tray", "tray.killswitch.crashed", {}, error=exc)
+                message = tr(
+                    "proton.killswitch.clean_failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 icon = QSystemTrayIcon.MessageIcon.Critical
             else:
                 if result.removed:

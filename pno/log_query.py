@@ -143,6 +143,11 @@ def summarize(events: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return {"total": total, "by_level": by_level, "by_component": by_component}
 
 
+def _one_line(value: Any, limit: int = 400) -> str:
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def format_text(event: dict[str, Any]) -> str:
     ts = str(event.get("ts") or "")
     level = str(event.get("level") or "").upper()
@@ -156,6 +161,12 @@ def format_text(event: dict[str, Any]) -> str:
         suffix = f" {compact}"
     if error:
         suffix += f" error={error.get('code')}:{error.get('message')}"
+        detail = _one_line(error.get("detail") or "")
+        if detail:
+            suffix += f" detail={detail}"
+        hint = _one_line(error.get("hint") or "")
+        if hint:
+            suffix += f" hint={hint}"
     return f"{ts} {level:8} {component}: {name}{suffix}"
 
 

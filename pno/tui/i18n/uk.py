@@ -112,12 +112,14 @@ MESSAGES = {
         "Підключено до {server} (навантаження {load}); "
         "попередньо очищено застарілий стан Proton"
     ),
+    "notify.vpn_busy": "Інша дія VPN уже виконується",
     "notify.connect_failed": "Помилка підключення: {error}",
     "notify.disconnected": "Відключено",
     "notify.disconnect_failed": "Не вдалося відключитися: {error}",
     "notify.not_connected": "Немає з'єднання",
     "notify.copied": "Скопійовано {name}",
     "notify.refresh_started": "Оновлюю навантаження серверів…",
+    "notify.refresh_failed": "Не вдалося оновити: {error}",
     "notify.refreshed": "Дані серверів оновлено ({count})",
     "notify.mirrors_started": "Вимірюю дзеркала…",
     "notify.mirrors_done": "Дзеркала оновлено для {country}",

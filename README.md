@@ -186,7 +186,28 @@ log.
 Failed connect and disconnect attempts are written as `vpn.connect.failed` and
 `vpn.disconnect.failed` with Proton's own error text, and the CLI, TUI and tray
 show that detail instead of a generic message. Known Proton phrases (server
-unreachable, connect timeout, expired authentication) also get a hint.
+unreachable, connect timeout, expired authentication, a second concurrent
+connection) also get a hint.
+
+Every `protonvpn connect` / `protonvpn disconnect` invocation is also recorded
+as a `vpn.command` event with its arguments, exit code, duration and both raw
+output streams (capped at 4 KB each, with `stdout_truncated` / `stderr_truncated`
+flags). The Eventlet/sentry warning is removed from the user-facing detail but
+kept in the raw `stderr` field, and values that look like passwords or tokens
+are masked. A failed attempt shows the same text in the log that the user sees
+in a notification.
+
+Proton's exit code is not trusted blindly: after a non-zero code, `pno` checks
+NetworkManager for up to three seconds. If the requested state is actually
+reached (connected to the chosen server, or disconnected), the action is
+reported as success with `recovered: true` and the exit code is kept in
+`vpn.connect.exit-nonzero` / `vpn.disconnect.exit-nonzero` for diagnostics.
+
+Only one VPN action runs at a time. `pno` takes a non-blocking `flock` on
+`$XDG_RUNTIME_DIR/proton-net-optimizer/vpn-action.lock`; a second CLI, tray or
+TUI action fails with the typed `vpn_busy` error instead of racing Proton's
+single-connection backend. In the TUI the Connect, Secure Connect and Disconnect
+buttons stay disabled until the running action finishes.
 
 ## How it works
 
@@ -336,6 +357,8 @@ User-specific data never lives in the repository:
 - TUI session state, server/mirror caches and logs:
   `~/.local/state/proton-net-optimizer/`;
 - daemon socket: `$XDG_RUNTIME_DIR/proton-net-optimizer/`;
+- VPN action lock (one connect/disconnect at a time):
+  `$XDG_RUNTIME_DIR/proton-net-optimizer/vpn-action.lock`;
 - Proton's own settings, read or written only on explicit request:
   `~/.config/Proton/VPN/settings.json` and `app-config.json`. These are
   Proton's files, never part of this repository, and split-tunneling paths or
@@ -418,6 +441,11 @@ pno logs --level warning --since -24h --json
 pno logs --event 'mirrors.*' --summary
 pno logs --component vpn --limit 50
 ```
+
+In text mode `pno logs` prints the typed error code, message, detail and hint,
+so a failed VPN command can be understood without opening Proton's own logs.
+`vpn.command` events keep both raw output streams; `stdout_truncated` and
+`stderr_truncated` mark a cut at 4 KB. Credential-looking values are masked.
 
 Rotated at `log_max_bytes` into `logs/archive/`. Retention is enforced at
 startup, after each rotation and on demand: the active file is never deleted,

@@ -99,6 +99,12 @@ class VpnError(PnoError):
     code = "vpn_error"
 
 
+class VpnBusyError(PnoError):
+    """Another pno process is already connecting or disconnecting."""
+
+    code = "vpn_busy"
+
+
 class KillSwitchError(PnoError):
     code = "killswitch_error"
 

@@ -111,12 +111,14 @@ MESSAGES = {
     "notify.connected_stale": (
         "Connected to {server} (load {load}); cleared a stale Proton state first"
     ),
+    "notify.vpn_busy": "Another VPN action is already running",
     "notify.connect_failed": "Connection failed: {error}",
     "notify.disconnected": "Disconnected",
     "notify.disconnect_failed": "Disconnect failed: {error}",
     "notify.not_connected": "Not connected",
     "notify.copied": "Copied {name}",
     "notify.refresh_started": "Refreshing server loads…",
+    "notify.refresh_failed": "Refresh failed: {error}",
     "notify.refreshed": "Server data updated ({count} servers)",
     "notify.mirrors_started": "Measuring mirrors…",
     "notify.mirrors_done": "Mirrors updated for {country}",
