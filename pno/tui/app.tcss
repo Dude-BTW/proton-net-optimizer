@@ -349,6 +349,16 @@ RequirementsScreen {
     width: 40;
 }
 
+#settings-layout Checkbox {
+    width: 40;
+    margin-top: 1;
+}
+
+#settings-favorites-hint {
+    margin-top: 0;
+    color: $text-muted;
+}
+
 #settings-save-btn {
     margin-top: 2;
     width: 20;

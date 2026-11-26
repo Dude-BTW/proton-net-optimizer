@@ -929,6 +929,7 @@ def test_tui_best_from_favorites_setting_is_saved(monkeypatch):
             await pilot.pause()
             checkbox = app.query_one("#best-from-favorites", Checkbox)
             assert checkbox.value is False
+            assert checkbox.size.width == app.query_one("#top-n", Input).size.width
             checkbox.value = True
             app._on_settings_save()
             await pilot.pause()
