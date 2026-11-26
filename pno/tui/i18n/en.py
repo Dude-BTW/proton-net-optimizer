@@ -37,6 +37,8 @@ MESSAGES = {
     "current.delta": "{delta} vs best",
     "current.pool.regular": "regular",
     "current.pool.secure": "Secure Core",
+    "current.pool.favorites_suffix": " (favorites)",
+    "current.pool.empty": "none in favorites",
     "button.pause": "Pause",
     "button.resume": "Resume",
     "button.disconnect": "Disconnect",
@@ -103,6 +105,11 @@ MESSAGES = {
     "mirrors.sync_db_attention": "sync databases need attention",
     "settings.language": "Language",
     "settings.top_n": "Servers per country",
+    "settings.favorites_only": "Favorites only",
+    "settings.favorites_only_hint": (
+        "The best regular / Secure Core alternative is chosen from your "
+        "favorites; the best-in-country comparison is unchanged."
+    ),
     "settings.home_country": "Home country (no VPN)",
     "settings.terminal": "Terminal for tray (empty = auto)",
     "settings.save": "Save",

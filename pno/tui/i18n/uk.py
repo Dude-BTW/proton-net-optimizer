@@ -37,6 +37,8 @@ MESSAGES = {
     "current.delta": "{delta} до найкращого",
     "current.pool.regular": "звичайний",
     "current.pool.secure": "Secure Core",
+    "current.pool.favorites_suffix": " (вибране)",
+    "current.pool.empty": "немає у вибраному",
     "button.pause": "Пауза",
     "button.resume": "Продовжити",
     "button.disconnect": "Відключити",
@@ -103,6 +105,11 @@ MESSAGES = {
     "mirrors.sync_db_attention": "бази синхронізації потребують уваги",
     "settings.language": "Мова",
     "settings.top_n": "Серверів на країну",
+    "settings.favorites_only": "Тільки вибране",
+    "settings.favorites_only_hint": (
+        "Найкращий звичайний / Secure Core обирається лише серед вибраного; "
+        "порівняння в межах країни не змінюється."
+    ),
     "settings.home_country": "Домашня країна (без VPN)",
     "settings.terminal": "Термінал для трею (порожньо = авто)",
     "settings.save": "Зберегти",

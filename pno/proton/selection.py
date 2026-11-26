@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pno.inventory import Inventory
+from pno.inventory import load as load_inventory
 from pno.proton.models import (
     CountryServers,
     SecureCoreCountry,
@@ -125,13 +126,15 @@ class CurrentServerInfo:
     """Measured context for the server the user is connected to."""
 
     server: Server
-    pool_best: Server
+    pool_best: Server | None
     country_best: Server | None
-    pool_rank: int
+    pool_rank: int | None
     country_rank: int | None
 
     @property
-    def delta_pool(self) -> int:
+    def delta_pool(self) -> int | None:
+        if self.pool_best is None:
+            return None
         return self.server.load - self.pool_best.load
 
     @property
@@ -151,18 +154,41 @@ def current_server(snapshot: ServerSnapshot, name: str | None) -> Server | None:
     return snapshot.lookup(name)
 
 
+def _favorites_only_pool(
+    pool: list[Server], inventory: Inventory, *, secure_core: bool
+) -> list[Server]:
+    """Restrict an already eligible pool to the user's favorites.
+
+    Regular pools use favorite countries; Secure Core pools use the exact
+    routes saved in the favorites file. No ordering is added here.
+    """
+    if secure_core:
+        allowed = {name.upper() for name in inventory.secure_core_servers}
+        return [server for server in pool if server.name.upper() in allowed]
+    allowed_countries = {code.upper() for code in inventory.known_countries}
+    return [
+        server
+        for server in pool
+        if server.exit_code and server.exit_code.upper() in allowed_countries
+    ]
+
+
 def current_server_info(
     snapshot: ServerSnapshot,
     name: str | None,
     *,
     max_tier: int | None = None,
     include_tor: bool = False,
+    favorites_only: bool = False,
+    inventory: Inventory | None = None,
 ) -> CurrentServerInfo | None:
     """Compare the connected server with the best alternatives.
 
     Regular servers are compared with regular servers, Secure Core routes with
     Secure Core routes; the country comparison always uses the same exit
-    country.
+    country. With ``favorites_only`` the pool alternative (``best regular`` /
+    ``best Secure Core``) is restricted to the user's favorites while the
+    local country comparison stays unchanged.
     """
     server = current_server(snapshot, name)
     if server is None:
@@ -181,12 +207,18 @@ def current_server_info(
             pool_rank=1,
             country_rank=None,
         )
-    pool_best = min(pool, key=lambda item: item.sort_key)
-    country_pool = [item for item in pool if item.exit_code == server.exit_code]
+    full_pool = pool
+    if favorites_only:
+        favorites = inventory if inventory is not None else load_inventory()
+        pool = _favorites_only_pool(pool, favorites, secure_core=server.secure_core)
+    pool_best = min(pool, key=lambda item: item.sort_key) if pool else None
+    pool_rank = (
+        1 + sum(1 for item in pool if item.sort_key < server.sort_key) if pool else None
+    )
+    country_pool = [item for item in full_pool if item.exit_code == server.exit_code]
     country_best = (
         min(country_pool, key=lambda item: item.sort_key) if country_pool else None
     )
-    pool_rank = 1 + sum(1 for item in pool if item.sort_key < server.sort_key)
     country_rank = (
         1 + sum(1 for item in country_pool if item.sort_key < server.sort_key)
         if country_pool

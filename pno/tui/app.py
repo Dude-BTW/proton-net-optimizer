@@ -578,6 +578,15 @@ class PnoApp(App[None]):
                     yield Input(
                         value=str(self.config.top_n), id="top-n", type="integer"
                     )
+                    yield Checkbox(
+                        tr("settings.favorites_only"),
+                        value=self.config.best_from_favorites,
+                        id="best-from-favorites",
+                    )
+                    yield Static(
+                        tr("settings.favorites_only_hint"),
+                        id="settings-favorites-hint",
+                    )
                     yield Label(tr("settings.home_country"), id="label-home-country")
                     yield Input(value=self.config.home_country, id="home-country")
                     yield Label(tr("settings.terminal"), id="label-terminal")
@@ -834,6 +843,8 @@ class PnoApp(App[None]):
         except PnoError as exc:
             self.favorites_saved = favorites_module.Favorites()
             self.notify(str(exc), severity="error", timeout=8)
+        else:
+            self.inventory = self.favorites_saved.to_inventory()
         self.favorites_dirty_side = None
         self.query_one("#favorites-text-status", Static).update("")
         self._sync_favorites_text()
@@ -976,11 +987,13 @@ class PnoApp(App[None]):
             self.notify(exc.message, severity="error", timeout=8)
             return
         self.favorites_saved = updated.normalized()
+        self.inventory = self.favorites_saved.to_inventory()
         self.favorites_dirty_side = None
         self.query_one("#favorites-text-status", Static).update("")
         self._sync_favorites_text()
         self._rebuild_favorites_visual()
         self._update_favorites_controls()
+        self._refresh_status()
         self.notify(tr("favorites.saved"), severity="information")
 
     def _revert_favorites(self) -> None:
@@ -989,11 +1002,13 @@ class PnoApp(App[None]):
         except PnoError as exc:
             self.notify(exc.message, severity="error", timeout=8)
             return
+        self.inventory = self.favorites_saved.to_inventory()
         self.favorites_dirty_side = None
         self.query_one("#favorites-text-status", Static).update("")
         self._sync_favorites_text()
         self._rebuild_favorites_visual()
         self._update_favorites_controls()
+        self._refresh_status()
         self.notify(tr("favorites.reverted"), severity="information")
 
     # ------------------------------------------------------- proton settings
@@ -1814,6 +1829,8 @@ class PnoApp(App[None]):
                 self.current_server,
                 max_tier=self.snapshot.max_tier or None,
                 include_tor=self.config.include_tor,
+                favorites_only=self.config.best_from_favorites,
+                inventory=self.inventory,
             )
         if info is None:
             line.append(self.current_server, style=theme.server_style())
@@ -1855,15 +1872,20 @@ class PnoApp(App[None]):
         pool_label = tr(
             "current.pool.secure" if info.secure_core else "current.pool.regular"
         )
+        if self.config.best_from_favorites:
+            pool_label += tr("current.pool.favorites_suffix")
         line.append(tr("current.best_pool", pool=pool_label), style=theme.TEAL)
-        line.append(
-            server_label(info.pool_best.name, info.pool_best.exit_code),
-            style=theme.GREEN,
-        )
-        line.append(
-            f" {info.pool_best.load}%",
-            style=theme.load_style(info.pool_best.load),
-        )
+        if info.pool_best is None:
+            line.append(tr("current.pool.empty"), style=theme.LABEL)
+        else:
+            line.append(
+                server_label(info.pool_best.name, info.pool_best.exit_code),
+                style=theme.GREEN,
+            )
+            line.append(
+                f" {info.pool_best.load}%",
+                style=theme.load_style(info.pool_best.load),
+            )
         widget.update(line)
 
     def _refresh_logs(self) -> None:
@@ -2464,11 +2486,15 @@ class PnoApp(App[None]):
             return
         home = self.query_one("#home-country", Input).value.strip().upper()
         terminal = self.query_one("#terminal", Input).value.strip()
+        best_from_favorites = bool(
+            self.query_one("#best-from-favorites", Checkbox).value
+        )
         updated = dataclasses.replace(
             self.config,
             top_n=top_n,
             home_country=home,
             terminal=terminal,
+            best_from_favorites=best_from_favorites,
         )
         try:
             updated.validate()
@@ -2478,6 +2504,7 @@ class PnoApp(App[None]):
         config_module.save(updated)
         self.config = updated
         self._populate_countries()
+        self._refresh_status()
         self._reload_daemon_config()
         self._mark_state_dirty()
         self.notify(tr("settings.saved"))
@@ -2734,6 +2761,12 @@ class PnoApp(App[None]):
         self.query_one("#mirror-refresh-btn", Button).label = tr("mirrors.refresh")
         self.query_one("#auto-mirror", Checkbox).label = tr("mirrors.auto")
         self.query_one("#label-top-n", Label).update(tr("settings.top_n"))
+        self.query_one("#best-from-favorites", Checkbox).label = tr(
+            "settings.favorites_only"
+        )
+        self.query_one("#settings-favorites-hint", Static).update(
+            tr("settings.favorites_only_hint")
+        )
         self.query_one("#label-home-country", Label).update(tr("settings.home_country"))
         self.query_one("#label-terminal", Label).update(tr("settings.terminal"))
         self.query_one("#label-language", Label).update(tr("settings.language"))

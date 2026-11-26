@@ -13,6 +13,16 @@ def test_defaults_are_valid():
     assert config.top_n == 10
     assert config.home_country == "UA"
     assert config.language == "en"
+    assert config.best_from_favorites is False
+
+
+def test_best_from_favorites_roundtrip_and_type_check(tmp_path):
+    path = tmp_path / "config.toml"
+    config_module.save(Config(best_from_favorites=True), path)
+    assert config_module.load(path).best_from_favorites is True
+    path.write_text('best_from_favorites = "yes"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        config_module.load(path)
 
 
 def test_save_and_load_roundtrip(tmp_path):

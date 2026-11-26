@@ -122,7 +122,7 @@ Every command that returns structured data also accepts `--json`.
 | Mirrors | Target country, last refresh, measured candidates, Preview / Refresh & apply, auto-refresh checkbox |
 | Logs | Tail of the JSONL event stream plus editable retention limits |
 | Proton VPN | Account, NetShield, kill switch, port forwarding, split tunneling, protocol, VPN Accelerator, Moderate NAT, IPv6, custom DNS, telemetry, crash reports; a warning and cleanup button appear when a temporary kill-switch connection is left behind; GUI-only preferences are shown read-only |
-| Application | Top-N, home country, terminal, language (EN/UK) |
+| Application | Top-N, favorites-only best alternative, home country, terminal, language (EN/UK) |
 
 Keys: `F5` refresh, `c` connect to the selected row, `d` disconnect,
 `p` pause/resume, `Ctrl+Q` quit. The current selection is never applied
@@ -132,7 +132,10 @@ A line under the status bar always shows the connected server, its current
 load, the least-loaded server in the same country (with the difference) and
 the best alternative in the same pool (regular servers or Secure Core). Loads
 update with the daemon's server refresh, so the decision to switch is based on
-current measurements rather than the moment of connecting.
+current measurements rather than the moment of connecting. **Favorites only**
+in the Application tab restricts that pool alternative to your regular
+favorite countries (for regular servers) or exact favorite Secure Core routes;
+the best-in-country comparison still uses every eligible server.
 
 The status area uses the Catppuccin Mocha palette: muted labels, a blue exit
 country, and a traffic-light load (green below 40%, yellow 40–69%, red 70% and
@@ -396,6 +399,7 @@ your favorites and settings.
 | --- | --- | --- |
 | `top_n` | `10` | servers shown per country |
 | `include_tor` | `false` | include Tor-only servers in suggestions |
+| `best_from_favorites` | `false` | choose the “best regular / Secure Core” alternative from favorites only |
 | `home_country` | `"UA"` | mirror target when the VPN is off |
 | `poll_interval` | `10` | VPN state poll, seconds |
 | `loads_interval` | `60` | load refresh interval, seconds |

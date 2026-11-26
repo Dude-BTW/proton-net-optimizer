@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from textual.widgets import (
 
 from pno import favorites as favorites_module
 from pno import paths
+from pno.inventory import Inventory
 from pno.proton.killswitch import ConnectionInfo, KillSwitchReport
 from pno.proton.serverlist import snapshot_from_payload
 from pno.tui import app as tui_app
@@ -912,6 +914,55 @@ def test_tui_vpn_action_guard_disables_buttons(monkeypatch):
             assert app.query_one("#connect-btn", Button).disabled is False
             app._start_connect("UA#1")
             assert spawned == ["UA#1"]
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_best_from_favorites_setting_is_saved(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            checkbox = app.query_one("#best-from-favorites", Checkbox)
+            assert checkbox.value is False
+            checkbox.value = True
+            app._on_settings_save()
+            await pilot.pause()
+            from pno import config as config_module
+
+            assert app.config.best_from_favorites is True
+            assert config_module.load().best_from_favorites is True
+        set_language("en")
+
+    asyncio.run(scenario())
+
+
+def test_tui_best_from_favorites_limits_the_banner(monkeypatch):
+    seed_servers()
+    monkeypatch.setattr(tui_app, "mirrors_overview", lambda *a, **k: {})
+
+    async def scenario():
+        app = _TestApp()
+        async with app.run_test(size=(150, 50)) as pilot:
+            await pilot.pause()
+            app.config = dataclasses.replace(app.config, best_from_favorites=True)
+            app.inventory = Inventory(known_countries=("JP",))
+            app.remote_status = {
+                "vpn": {
+                    "connected": True,
+                    "server_name": "UA#1",
+                    "exit_country": "UA",
+                    "load": 10,
+                }
+            }
+            app._refresh_status()
+            await pilot.pause()
+            banner = str(app.query_one("#current-info", Static).content)
+            assert "best regular (favorites): none in favorites" in banner
         set_language("en")
 
     asyncio.run(scenario())

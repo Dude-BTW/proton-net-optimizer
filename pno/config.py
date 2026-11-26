@@ -22,6 +22,10 @@ class Config:
     top_n: int = 10
     include_tor: bool = False
     home_country: str = "UA"
+    # Compute the "best regular / best Secure Core" alternative from the
+    # user's favorites only. The local "best in country" comparison is
+    # unaffected.
+    best_from_favorites: bool = False
 
     # Daemon timing (seconds)
     poll_interval: float = 10.0
@@ -144,6 +148,7 @@ _TYPE_COERCE = {
     "log_keep_files": int,
     "log_max_age_days": int,
     "include_tor": bool,
+    "best_from_favorites": bool,
     "auto_mirror": bool,
     "auto_mirror_on_vpn_change": bool,
     "auto_clean_stale_killswitch": bool,

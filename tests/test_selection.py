@@ -167,3 +167,86 @@ def test_current_server_info_unknown_name():
     assert (
         current_server_info(snapshot([server("DE#1", "DE", "DE", 1)]), "ZZ#1") is None
     )
+
+
+def test_current_server_info_favorites_only_limits_regular_pool():
+    data = snapshot(
+        [
+            server("UA#1", "UA", "UA", 10),
+            server("UA#2", "UA", "UA", 5),
+            server("DE#1", "DE", "DE", 1),
+            server("FR#1", "FR", "FR", 2),
+        ]
+    )
+    info = current_server_info(
+        data,
+        "UA#1",
+        favorites_only=True,
+        inventory=Inventory(known_countries=("UA",)),
+    )
+    assert info is not None
+    assert info.pool_best is not None
+    assert info.pool_best.name == "UA#2"
+    assert info.delta_pool == 5
+    assert info.pool_rank == 2
+    assert info.country_best is not None
+    assert info.country_best.name == "UA#2"
+
+
+def test_current_server_info_favorites_only_limits_secure_core_routes():
+    data = snapshot(
+        [
+            server("CH-US#3", "CH", "US", 40, features=FEATURE_SECURE_CORE),
+            server("FR-US#9", "FR", "US", 10, features=FEATURE_SECURE_CORE),
+            server("IS-CH#1", "IS", "CH", 5, features=FEATURE_SECURE_CORE),
+        ]
+    )
+    info = current_server_info(
+        data,
+        "CH-US#3",
+        favorites_only=True,
+        inventory=Inventory(secure_core_servers=("CH-US#3",)),
+    )
+    assert info is not None
+    assert info.pool_best is not None
+    assert info.pool_best.name == "CH-US#3"
+    assert info.country_best is not None
+    assert info.country_best.name == "FR-US#9"
+
+
+def test_current_server_info_favorites_only_empty_pool():
+    data = snapshot(
+        [
+            server("UA#1", "UA", "UA", 10),
+            server("DE#1", "DE", "DE", 1),
+        ]
+    )
+    info = current_server_info(
+        data,
+        "UA#1",
+        favorites_only=True,
+        inventory=Inventory(known_countries=("JP",)),
+    )
+    assert info is not None
+    assert info.pool_best is None
+    assert info.pool_rank is None
+    assert info.delta_pool is None
+    assert info.country_best is not None
+    assert info.country_best.name == "UA#1"
+
+
+def test_current_server_info_secure_pool_ignores_bare_countries():
+    data = snapshot(
+        [
+            server("CH-US#3", "CH", "US", 40, features=FEATURE_SECURE_CORE),
+            server("FR-US#9", "FR", "US", 10, features=FEATURE_SECURE_CORE),
+        ]
+    )
+    info = current_server_info(
+        data,
+        "CH-US#3",
+        favorites_only=True,
+        inventory=Inventory(known_countries=("US",)),
+    )
+    assert info is not None
+    assert info.pool_best is None
